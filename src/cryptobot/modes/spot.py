@@ -73,10 +73,17 @@ def run(cfg: Config) -> None:
     except RuntimeError as e:
         print(f"Skipped: {e}")
     else:
-        for b in sorted(balances.values(), key=lambda b: b.asset):
-            print(f"{b.asset:>10}  total={b.total:<18.8f} free={b.free:<18.8f} in orders={b.used:.8f}")
-        if not balances:
-            print("(no non-zero balances)")
+        # Show only the assets our pairs use (the testnet gives you hundreds of coins).
+        relevant = {cfg.quote_currency} | {asset for pair in cfg.pairs for asset in pair.split("/")}
+        for asset in sorted(relevant):
+            b = balances.get(asset)
+            if b:
+                print(f"{b.asset:>10}  total={b.total:<18.8f} free={b.free:<18.8f} in orders={b.used:.8f}")
+            else:
+                print(f"{asset:>10}  0")
+        others = len(set(balances) - relevant)
+        if others:
+            print(f"(+ {others} other assets with a balance, not shown)")
 
     store.close()
     notifier.send(f"Startup check finished ({cfg.mode}/{cfg.environment})")
