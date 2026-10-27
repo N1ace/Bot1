@@ -1,0 +1,8 @@
+# Installed with:  pip install --no-deps -r requirements-nodeps.txt
+#
+# pandas-ta 0.4.71b0 declares an exact pin "numba==0.61.2". That old numba has no
+# build for Python 3.14, so a normal install fails. We install pandas-ta WITHOUT its
+# declared dependencies and provide a newer numba ourselves (requirements.txt).
+# Checked: EMA/RSI/ATR/MACD work with numba 0.68 + pandas 3.1, and the EMA matches
+# pandas' own ewm() exactly. `pip check` will warn about the numba pin - expected.
+pandas-ta==0.4.71b0     # technical indicators (EMA, RSI, ATR, MACD, ...)

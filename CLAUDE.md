@@ -37,7 +37,8 @@ This repo holds two things side by side:
 - Strategies return `Signal`s only; they never place orders or see keys.
 - One API key per Binance account/portfolio: env names `BINANCE_<ACCOUNT>_<ENV>_API_KEY`.
 - Spot margin has **no Binance testnet** — margin work is tested with the paper broker.
-- Indicators: plain pandas for now (`ewm` etc.); `pandas-ta` only if it supports our Python.
+- Indicators: `pandas-ta`, installed with `--no-deps` (requirements-nodeps.txt) because
+  its exact `numba==0.61.2` pin has no Python 3.14 build; we pin a newer numba ourselves.
 - Store all timestamps in UTC. Record every order, fill and fee (Israeli tax reporting).
 - Keep code simple and commented; the user is learning — explain important decisions.
 

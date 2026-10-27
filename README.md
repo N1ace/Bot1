@@ -24,8 +24,10 @@ python -m venv .venv
 #    If PowerShell refuses with "running scripts is disabled", run once:
 #    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-# 2. Install dependencies, then the bot itself in "editable" mode
+# 2. Install dependencies (two steps - see requirements-nodeps.txt for why),
+#    then the bot itself in "editable" mode
 pip install -r requirements.txt
+pip install --no-deps -r requirements-nodeps.txt
 pip install -e .
 
 # 3. Secrets
@@ -36,11 +38,16 @@ notepad .env
 ### Get Binance Spot Testnet keys
 
 1. Go to <https://testnet.binance.vision>, log in with GitHub.
-2. **Generate HMAC_SHA256 Key**. Copy the key and secret (the secret is shown once).
+2. **Generate HMAC_SHA256 Key**: description e.g. `cryptobot_spot`, permissions
+   TRADE + USER_DATA + USER_STREAM. Copy the key and secret (the secret is shown once).
 3. In `.env` set `BINANCE_SPOT_TESTNET_API_KEY=` and `BINANCE_SPOT_TESTNET_API_SECRET=`.
+4. Turn on testnet commissions (0.1% maker / 0.1% taker) so fills include fees like live.
 
-Testnet balances are fake and the testnet is reset roughly monthly. Its prices are
-thin and noisy (big random wicks), so don't judge a strategy on testnet data.
+Testnet balances are fake and all testnet data is wiped roughly monthly (regenerate
+the key if it stops working). Testnet has its **own order books, independent of the
+real market**, with very little trading - so a few orders can push the price far,
+causing big wicks. Use the testnet to check that orders work, never to judge a strategy.
+Binance **Demo Mode** (demo.binance.com) has prices close to the live market.
 For live keys later, Binance recommends **Ed25519** keys; always disable withdrawals
 and restrict the key to your IP.
 
@@ -98,7 +105,7 @@ candles (data/) -> Strategy -> Signal -> sized OrderRequest
 ## Troubleshooting
 
 - **`DLL load failed ... An Application Control policy has blocked this file`** -
-  Windows Smart App Control blocked a compiled package file. This happened with
-  pandas 3.1.0, which is why `requirements.txt` pins pandas 2.3.3.
+  Windows Smart App Control blocked a compiled package file (it blocked pandas 3.1.0
+  on this PC until Smart App Control was turned off).
 - **`Timestamp for this request is outside of the recvWindow`** - sync your
   Windows clock (Settings → Time & language → Sync now).
