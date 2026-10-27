@@ -75,6 +75,20 @@ Switch `environment:` in `config/config.yaml`:
 | `testnet` | testnet | testnet (fake) | testnet (later) | testnet keys |
 | `live`    | real | real | **real money** | live keys + guard |
 
+## Going live (later - order placement is not built yet)
+
+All of these are required; any one missing and the bot refuses to start:
+
+1. `config/config.yaml`: `environment: live` and `live_trading: true`
+2. `.env`: `BINANCE_SPOT_LIVE_API_KEY` / `BINANCE_SPOT_LIVE_API_SECRET`
+   (withdrawals disabled, IP-restricted)
+3. In the terminal, for that session only (never in `.env`):
+   ```powershell
+   $env:CRYPTOBOT_CONFIRM_LIVE = "I_UNDERSTAND_REAL_MONEY"
+   python -m cryptobot
+   ```
+   Closing the terminal removes it.
+
 ## Layout
 
 ```
