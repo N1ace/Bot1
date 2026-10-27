@@ -62,6 +62,11 @@ python -m pytest                    # run the tests
 The startup check prints the last 100 closed 1h candles for each pair and your
 testnet balances. **It places no orders.** Logs go to the console and `logs/cryptobot.log`.
 
+By default candles come from the **real Binance market** (`market_data: live`,
+read-only server `data-api.binance.vision`, no key), even when balances and orders
+are on the testnet. Testnet orders still fill at testnet prices, which can be
+1-2% away from the real price.
+
 Switch `environment:` in `config/config.yaml`:
 
 | environment | market data | balances | orders | keys needed |

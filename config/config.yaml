@@ -17,6 +17,13 @@ mode: spot
 environment: testnet
 live_trading: false
 
+# Where candles/prices come from.
+#   live     - real Binance market data (data-api.binance.vision, read-only, no key).
+#              Recommended: testnet prices are thin and spiky.
+#   exchange - the same place orders go (testnet data on testnet).
+# Paper mode always uses live data. Orders on testnet still fill at TESTNET prices.
+market_data: live
+
 # Which API key set to use. Keys are read from .env as
 #   BINANCE_<ACCOUNT>_<ENVIRONMENT>_API_KEY / _API_SECRET
 # e.g. account SPOT + environment testnet -> BINANCE_SPOT_TESTNET_API_KEY

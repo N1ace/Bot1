@@ -16,6 +16,7 @@ import yaml
 
 MODES = ("spot", "margin", "futures", "copytrade_lead")
 ENVIRONMENTS = ("paper", "testnet", "live")
+MARKET_DATA_SOURCES = ("live", "exchange")
 
 # Live trading needs this exact value in the environment, on top of the config flag.
 LIVE_CONFIRM_ENV = "CRYPTOBOT_CONFIRM_LIVE"
@@ -55,6 +56,7 @@ class Config:
     timeframe: str
     candle_limit: int
     risk: RiskConfig
+    market_data: str = "live"
     paper_balances: dict[str, float] = field(default_factory=dict)
     log_level: str = "INFO"
     log_dir: str = "logs"
@@ -91,6 +93,7 @@ def _build(raw: dict) -> Config:
             timeframe=str(raw.get("timeframe", "1h")),
             candle_limit=int(raw.get("candle_limit", 100)),
             risk=risk,
+            market_data=str(raw.get("market_data", "live")),
             paper_balances={k: float(v) for k, v in raw.get("paper", {}).get("starting_balances", {}).items()},
             log_level=str(raw.get("logging", {}).get("level", "INFO")).upper(),
             log_dir=str(raw.get("logging", {}).get("dir", "logs")),
@@ -104,6 +107,8 @@ def _build(raw: dict) -> Config:
         raise ConfigError(f"mode must be one of {MODES}, got {cfg.mode!r}")
     if cfg.environment not in ENVIRONMENTS:
         raise ConfigError(f"environment must be one of {ENVIRONMENTS}, got {cfg.environment!r}")
+    if cfg.market_data not in MARKET_DATA_SOURCES:
+        raise ConfigError(f"market_data must be one of {MARKET_DATA_SOURCES}, got {cfg.market_data!r}")
     if not cfg.pairs:
         raise ConfigError("pairs must list at least one symbol, e.g. BTC/USDT")
     if risk.max_order_value <= 0 or risk.max_open_positions <= 0 or risk.max_daily_loss <= 0:
