@@ -1,0 +1,50 @@
+# ------------------------------------------------------------------
+# cryptobot configuration. Secrets do NOT go here - they go in .env
+# ------------------------------------------------------------------
+
+# Which trading module to run.
+#   spot            - implemented (read-only startup check for now)
+#   margin          - later (spot margin: cross / isolated, borrow / repay)
+#   futures         - later (USD-M futures)
+#   copytrade_lead  - later (futures copy-trading lead account)
+mode: spot
+
+# Where orders would go.
+#   paper   - simulated balances, real public market data, no keys needed
+#   testnet - Binance Spot Testnet (testnet.binance.vision), fake money
+#   live    - REAL MONEY. Also requires live_trading: true AND the
+#             CRYPTOBOT_CONFIRM_LIVE environment variable. See CLAUDE.md.
+environment: testnet
+live_trading: false
+
+# Which API key set to use. Keys are read from .env as
+#   BINANCE_<ACCOUNT>_<ENVIRONMENT>_API_KEY / _API_SECRET
+# e.g. account SPOT + environment testnet -> BINANCE_SPOT_TESTNET_API_KEY
+account: SPOT
+
+quote_currency: USDT
+pairs:
+  - BTC/USDT
+  - ETH/USDT
+timeframe: 1h
+candle_limit: 100        # how many closed candles to fetch
+
+risk:
+  max_order_value: 50          # max value of ONE order, in quote currency (USDT)
+  max_open_positions: 2        # max number of symbols held at the same time
+  max_daily_loss: 30           # USDT; when today's loss reaches this, stop opening trades
+  require_stop_loss: true      # every entry must come with a stop-loss price
+
+paper:
+  starting_balances:
+    USDT: 1000
+
+logging:
+  level: INFO                  # DEBUG for more detail
+  dir: logs
+
+storage:
+  sqlite_path: data/cryptobot.sqlite
+
+telegram:
+  enabled: false               # stub only for now; token/chat id go in .env

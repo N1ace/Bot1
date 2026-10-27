@@ -1,0 +1,11 @@
+# Pinned so every install gets the same versions. Upgrade deliberately, then re-run tests.
+ccxt==4.5.90            # exchange access (wrapped in src/cryptobot/exchange)
+# candle data + indicators (EMA etc. via pandas .ewm). Kept on 2.3.3 on purpose:
+# Windows Smart App Control blocks pandas 3.1.0's compiled files on this PC.
+pandas==2.3.3
+python-dotenv==1.2.4    # loads secrets from .env
+PyYAML==6.0.3           # reads config/config.yaml
+pytest==9.1.1           # tests
+
+# pandas-ta is intentionally NOT installed: it needs numba, which does not
+# build on Python 3.14 yet. Indicators are written with plain pandas for now.

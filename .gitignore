@@ -1,0 +1,26 @@
+# --- secrets: NEVER commit ---
+.env
+.env.*
+!.env.example
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# --- cryptobot runtime files (anchored with / so src/cryptobot/data/ is NOT ignored) ---
+/logs/
+/data/
+*.sqlite
+*.sqlite-journal
+
+# --- freqtrade (user_data/) ---
+user_data/logs/
+user_data/data/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
+user_data/*.sqlite
+user_data/*.sqlite-journal
