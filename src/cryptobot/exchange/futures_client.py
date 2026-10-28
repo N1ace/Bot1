@@ -31,7 +31,8 @@ from binance_common.errors import Error as BinanceApiError
 from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import \
     DerivativesTradingUsdsFutures
 from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
-    ChangeMarginTypeMarginTypeEnum, NewAlgoOrderAlgoTypeEnum, NewAlgoOrderClosePositionEnum, NewAlgoOrderSideEnum,
+    ChangeMarginTypeMarginTypeEnum, NewAlgoOrderAlgoTypeEnum, NewAlgoOrderClosePositionEnum,
+    NewAlgoOrderPriceProtectEnum, NewAlgoOrderSideEnum,
     NewAlgoOrderTypeEnum, NewAlgoOrderWorkingTypeEnum, NewOrderNewOrderRespTypeEnum, NewOrderReduceOnlyEnum,
     NewOrderSideEnum, NewOrderTypeEnum)
 
@@ -126,6 +127,7 @@ class FuturesClient:
         self._api = DerivativesTradingUsdsFutures(config_rest_api=config).rest_api
         logging.getLogger("ConnectorLogger").setLevel(logging.WARNING)  # the SDK resets this on init
         self.rules: dict[str, SymbolRules] = {}
+        self.leverage: dict[str, int] = {}
 
     # ---- startup routine -----------------------------------------------------
 
@@ -167,6 +169,7 @@ class FuturesClient:
         if int(resp.leverage) != leverage:
             raise FuturesSetupError(f"{symbol}: Binance set leverage {resp.leverage}, expected {leverage}")
         setup = SymbolSetup(symbol, int(resp.leverage), to_decimal(resp.max_notional_value), "ISOLATED")
+        self.leverage[symbol] = setup.leverage
         log.info("%s: ISOLATED, leverage %dx (max position at this leverage: %s USDT)",
                  symbol, setup.leverage, setup.max_notional_at_leverage)
         return setup
@@ -209,8 +212,11 @@ class FuturesClient:
                     mark_price=to_decimal(p["markPrice"]),
                     liquidation_price=to_decimal(p["liquidationPrice"]),
                     unrealized_pnl=to_decimal(p["unRealizedProfit"]),
-                    margin_type=str(p.get("marginType", "")).upper(),
-                    leverage=int(p["leverage"]) if p.get("leverage") else None,
+                    # positionRisk v3 has no marginType/leverage fields: an isolated
+                    # position has its own wallet; leverage is what startup() set.
+                    margin_type=str(p.get("marginType") or
+                                    ("ISOLATED" if to_decimal(p.get("isolatedWallet", "0")) != 0 else "CROSSED")).upper(),
+                    leverage=int(p["leverage"]) if p.get("leverage") else self.leverage.get(p["symbol"]),
                 ))
         return result
 
@@ -303,6 +309,9 @@ class FuturesClient:
             trigger_price=to_decimal(trigger_price),
             close_position=NewAlgoOrderClosePositionEnum("true"),
             working_type=NewAlgoOrderWorkingTypeEnum.MARK_PRICE,
+            # priceProtect: Binance won't trigger the stop if mark and last price have
+            # drifted unusually far apart (protects against bad-tick triggers).
+            price_protect=NewAlgoOrderPriceProtectEnum("true"),
             client_algo_id=client_algo_id,
         )
         return _dump(resp.data())

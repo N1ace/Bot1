@@ -42,7 +42,7 @@ class FakeApi:
 
 def client_with(api) -> FuturesClient:
     client = FuturesClient.__new__(FuturesClient)  # skip __init__: no SDK, no keys
-    client._api, client.rules, client.environment = api, {}, "demo"
+    client._api, client.rules, client.leverage, client.environment = api, {}, {}, "demo"
     return client
 
 

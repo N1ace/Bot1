@@ -18,7 +18,9 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 | Live API key | ⏸ Not created yet — only after the demo phase passes |
 | Prompt A (startup, market stream, user stream) | ✅ Built and tested on demo 2026-10-28 |
 | Current phase | Roadmap step 4→6: reconciliation loop, risk manager sizing |
-| Orders placed so far | None |
+| Prompt B (demo test trade) | ✅ 2026-10-28: entry, algo stop (MARK_PRICE, priceProtect) confirmed, close, verify — OK |
+| Orders placed so far | Demo only: 1 test round trip (0.0007 BTC), net −0.04 USDT |
+| Live account size (planned) | ~20,000 USD |
 
 **Next:** risk manager (0.5% risk sizing, liquidation buffer), the risk-reviewer, then Prompt B
 (first demo test trade).

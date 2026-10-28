@@ -50,3 +50,4 @@ def test_stop_orders_close_position_on_mark_price():
     text = (SRC / "cryptobot" / "exchange" / "futures_client.py").read_text(encoding="utf-8")
     assert 'close_position=NewAlgoOrderClosePositionEnum("true")' in text
     assert "working_type=NewAlgoOrderWorkingTypeEnum.MARK_PRICE" in text
+    assert 'price_protect=NewAlgoOrderPriceProtectEnum("true")' in text
