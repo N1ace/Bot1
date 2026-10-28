@@ -76,6 +76,20 @@ What it does now (**it places no orders**):
 
 Logs go to the console and `logs/cryptobot.log`; data to `data/cryptobot.sqlite`.
 
+## Backtesting (strategy-risk-spec.md steps 1-2)
+
+```powershell
+python scripts/download_history.py        # BTCUSDT + ETHUSDT daily candles, mark candles, funding since 2020
+python scripts/run_backtest.py            # buy & hold sanity check, with and without funding
+```
+
+- History comes from data.binance.vision (every zip checked against its SHA-256) plus the
+  public REST API for the latest weeks, stored in `data/market.sqlite`. Re-runs fetch only what's new.
+- The engine (`src/cryptobot/backtest/engine.py`) works day by day: funding at real settlement
+  times on mark price, next-day-open fills with slippage + taker fee, stops on the mark-price
+  range (gap fills at the bar extreme, as the spec requires), live lot sizes (0.001 BTC/ETH)
+  and minimum order values, and account liquidation at maintenance margin.
+
 ## Going live (later - order placement is not built yet)
 
 All of these are required; any one missing and the bot refuses to start:

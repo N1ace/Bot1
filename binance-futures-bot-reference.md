@@ -21,6 +21,7 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 | Prompt B (demo test trade) | ✅ 2026-10-28: entry, algo stop (MARK_PRICE, priceProtect) confirmed, close, verify — OK |
 | Orders placed so far | Demo only: 1 test round trip (0.0007 BTC), net −0.04 USDT |
 | Live account size (planned) | ~20,000 USD |
+| Spec steps 1–2 (data + backtester) | ✅ 2026-10-28: BTC/ETH 2020-01→2026-10 stored; engine sanity-checked |
 
 **Next:** risk manager (0.5% risk sizing, liquidation buffer), the risk-reviewer, then Prompt B
 (first demo test trade).
