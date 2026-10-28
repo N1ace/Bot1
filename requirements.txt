@@ -2,7 +2,11 @@
 # Install in TWO steps (see README):
 #   pip install -r requirements.txt
 #   pip install --no-deps -r requirements-nodeps.txt
-ccxt==4.5.90            # exchange access (wrapped in src/cryptobot/exchange)
+# Official Binance USDⓈ-M futures SDK (wrapped in src/cryptobot/exchange/futures_client.py).
+# Its major version changes often - upgrade on purpose and re-run the tests.
+binance-sdk-derivatives-trading-usds-futures==18.1.0
+binance-common==4.7.0
+ccxt==4.5.90            # spot exchange access + fallback (wrapped in src/cryptobot/exchange)
 pandas==3.1.0           # candle data
 python-dotenv==1.2.4    # loads secrets from .env
 PyYAML==6.0.3           # reads config/config.yaml

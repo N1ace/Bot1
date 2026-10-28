@@ -33,7 +33,8 @@ class CcxtSpotClient(ExchangeClient):
         self._ex = ccxt.binance(
             {
                 "apiKey": credentials.api_key if credentials else None,
-                "secret": credentials.api_secret if credentials else None,
+                # HMAC secret, or PEM private key (CCXT detects Ed25519/RSA from the PEM text).
+                "secret": (credentials.api_secret or credentials.private_key) if credentials else None,
                 # CCXT waits between requests so we stay under Binance's rate limits.
                 "enableRateLimit": True,
                 "options": {

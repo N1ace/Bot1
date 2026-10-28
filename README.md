@@ -1,11 +1,14 @@
 # cryptobot
 
-A modular Binance trading bot in Python. **Spot** first; **spot margin**
-(cross/isolated, borrow/repay), **USDⓈ-M futures** and **copy-trading lead** later.
-Each mode is its own module and each Binance account uses its own API key.
+A modular Binance trading bot in Python. **Current focus: USDⓈ-M perpetual futures**
+(BTCUSDT, ETHUSDT) on Binance **Demo Trading**. Spot is parked; copy-trading lead later.
+Each Binance account uses its own API key.
 
-> Safety first: the bot runs on **paper / testnet by default**. Live trading needs
-> `live_trading: true` in the config **and** a confirmation environment variable.
+Decisions, roadmap and official doc links: [binance-futures-bot-reference.md](binance-futures-bot-reference.md).
+
+> Safety first: the bot runs on **demo by default**. Live trading needs
+> `live_trading: true` in the config **and** a confirmation typed in the terminal.
+> Futures use **ISOLATED margin only** and leverage is **capped at 3x in code**.
 > See [CLAUDE.md](CLAUDE.md) for all safety rules.
 
 This repo also contains a separate **Freqtrade** setup (`docker-compose.yml`,
@@ -35,53 +38,51 @@ copy .env.example .env     # only if you don't have a .env yet
 notepad .env
 ```
 
-### Get Binance Spot Testnet keys
+### Futures Demo keys
 
-1. Go to <https://testnet.binance.vision>, log in with GitHub.
-2. **Generate HMAC_SHA256 Key**: description e.g. `cryptobot_spot`, permissions
-   TRADE + USER_DATA + USER_STREAM. Copy the key and secret (the secret is shown once).
-3. In `.env` set `BINANCE_SPOT_TESTNET_API_KEY=` and `BINANCE_SPOT_TESTNET_API_SECRET=`.
-4. Turn on testnet commissions (0.1% maker / 0.1% taker) so fills include fees like live.
+1. Log in to Binance → **Demo Trading** → API Management (demo.binance.com).
+2. Create a **self-generated Ed25519** key (generate the pair with Binance's Key Generator,
+   upload the public key). Permissions: Reading + Futures. Never withdrawals.
+3. In `.env`:
+   ```
+   BINANCE_FUTURES_DEMO_API_KEY=<API key Binance showed you>
+   BINANCE_FUTURES_DEMO_PRIVATE_KEY=<the one long line between BEGIN/END PRIVATE KEY>
+   ```
+   For a live key later, keep the key in a file outside OneDrive and use
+   `BINANCE_FUTURES_LIVE_PRIVATE_KEY_PATH=` instead.
 
-Testnet balances are fake and all testnet data is wiped roughly monthly (regenerate
-the key if it stops working). Testnet has its **own order books, independent of the
-real market**, with very little trading - so a few orders can push the price far,
-causing big wicks. Use the testnet to check that orders work, never to judge a strategy.
-Binance **Demo Mode** (demo.binance.com) has prices close to the live market.
-For live keys later, Binance recommends **Ed25519** keys; always disable withdrawals
-and restrict the key to your IP.
+The demo account must be in **One-way** position mode and **Single-Asset** mode
+(Futures → Settings). The bot checks this and refuses to run otherwise.
 
 ## Run
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m cryptobot                 # uses config/config.yaml
+python -m cryptobot --minutes 10    # futures demo, uses config/config.yaml
 python -m pytest                    # run the tests
 ```
 
-The startup check prints the last 100 closed 1h candles for each pair and your
-testnet balances. **It places no orders.** Logs go to the console and `logs/cryptobot.log`.
+What it does now (**it places no orders**):
 
-By default candles come from the **real Binance market** (`market_data: live`,
-read-only server `data-api.binance.vision`, no key), even when balances and orders
-are on the testnet. Testnet orders still fill at testnet prices, which can be
-1-2% away from the real price.
+1. **Startup routine** - checks one-way + single-asset mode, sets ISOLATED margin and
+   2x leverage for each pair, loads the exchange rules (price tick, quantity step,
+   minimum order value).
+2. **Account snapshot** - balances, open positions, open orders and stop (algo) orders.
+3. **Streams for N minutes** - live 1h candles + mark price (logs each *closed* candle),
+   and the user data stream (every account event saved to SQLite, funding payments
+   saved separately for tax). Both reconnect automatically.
+4. **Summary** - messages received, closed candles, mark prices and funding rates,
+   account events, reconnects.
 
-Switch `environment:` in `config/config.yaml`:
-
-| environment | market data | balances | orders | keys needed |
-|---|---|---|---|---|
-| `paper`   | real Binance (public) | simulated from config | simulated (later) | none |
-| `testnet` | testnet | testnet (fake) | testnet (later) | testnet keys |
-| `live`    | real | real | **real money** | live keys + guard |
+Logs go to the console and `logs/cryptobot.log`; data to `data/cryptobot.sqlite`.
 
 ## Going live (later - order placement is not built yet)
 
 All of these are required; any one missing and the bot refuses to start:
 
 1. `config/config.yaml`: `environment: live` and `live_trading: true`
-2. `.env`: `BINANCE_SPOT_LIVE_API_KEY` / `BINANCE_SPOT_LIVE_API_SECRET`
-   (withdrawals disabled, IP-restricted)
+2. `.env`: `BINANCE_FUTURES_LIVE_API_KEY` + `BINANCE_FUTURES_LIVE_PRIVATE_KEY_PATH`
+   (separate key pair, Futures only, withdrawals disabled, IP-restricted)
 3. In the terminal, for that session only (never in `.env`):
    ```powershell
    $env:CRYPTOBOT_CONFIRM_LIVE = "I_UNDERSTAND_REAL_MONEY"
@@ -92,39 +93,56 @@ All of these are required; any one missing and the bot refuses to start:
 ## Layout
 
 ```
-config/config.yaml      settings: mode, environment, pairs, risk limits
+config/config.yaml        settings: mode, environment, pairs, leverage, risk limits
 src/cryptobot/
-  __main__.py           entry point (python -m cryptobot)
-  config.py             loads YAML + .env, validates, live-trading guard
-  models.py             shared data types (Signal, OrderRequest, Position, Fill ...)
-  logging_setup.py      console + rotating file logs, masks secrets
-  exchange/             the ONLY code that talks to Binance (CCXT); paper broker
-  data/                 candles (REST); WebSocket later
-  strategies/           Strategy base class; strategies only emit Signals
-  risk/                 RiskManager - approves/rejects every order
-  execution/            order placement (next session)
-  portfolio/            balances, positions, PnL
-  storage/              SQLite log of orders, fills, risk events (tax records)
-  notifications/        Telegram (stub)
-  modes/                spot now; margin, futures, copy-trade lead later
-  backtest/             backtester (later)
-tests/                  pytest tests
-logs/, data/            created at runtime, git-ignored
+  __main__.py             entry point (python -m cryptobot)
+  config.py               loads YAML + .env, validates, live guard, key loading
+  models.py               shared data types (Signal, OrderRequest, Position, Fill ...)
+  logging_setup.py        console + rotating file logs, masks secrets
+  indicators.py           EMA / RSI / ATR via pandas-ta
+  exchange/
+    futures_client.py     USDⓈ-M futures adapter around the official Binance SDK
+    filters.py            exchange rules + Decimal rounding (tick, step, min notional)
+    ccxt_client.py, market_data.py, paper_broker.py   spot (parked)
+  data/
+    market_stream.py      WebSocket klines + mark price, auto-reconnect
+    user_stream.py        user data stream (listenKey), events -> SQLite
+    candles.py            REST candles (spot)
+  strategies/             Strategy base class; strategies only emit Signals
+  risk/                   RiskManager - approves/rejects every order
+  execution/              order placement (next steps)
+  portfolio/              balances, positions, PnL
+  storage/                SQLite: orders, fills, stream events, funding, risk events
+  notifications/          Telegram (stub)
+  modes/                  futures (current), spot (parked)
+  backtest/               backtester (later)
+tests/                    pytest tests
+logs/, data/              created at runtime, git-ignored
 ```
 
 ### How data flows
 
 ```
-candles (data/) -> Strategy -> Signal -> sized OrderRequest
-     -> RiskManager.review(order, portfolio snapshot) -> approved?
-     -> execution/ (precision, min notional, clientOrderId) -> exchange/
-     -> storage/ records every order + fill; notifications/ alerts
+market stream (closed candles, mark price) -> Strategy -> Signal -> sized OrderRequest
+     -> RiskManager.review(order, account snapshot) -> approved?
+     -> execution/ (Decimal rounding, clientOrderId, algo stop-loss) -> futures_client
+     -> user stream confirms fills/stops -> storage/ (SQLite) ; notifications/ alerts
 ```
+
+## Spot (parked)
+
+Set `mode: spot` with `environment: paper` or `testnet` (keys from
+<https://testnet.binance.vision>: `BINANCE_SPOT_TESTNET_API_KEY` / `_API_SECRET`).
+`python -m cryptobot` then prints candles with indicators and balances.
+Testnet spot prices are thin and spiky; `market_data: live` uses real prices for candles.
 
 ## Troubleshooting
 
+- **`Account is in HEDGE position mode`** / **`Multi-Assets mode`** - change it in the
+  Binance Futures settings (demo or live), then rerun.
+- **`-2015 Invalid API-key, IP, or permissions`** - wrong key for the environment
+  (demo keys only work on demo), Futures permission missing, or your IP changed.
 - **`DLL load failed ... An Application Control policy has blocked this file`** -
-  Windows Smart App Control blocked a compiled package file (it blocked pandas 3.1.0
-  on this PC until Smart App Control was turned off).
+  Windows Smart App Control blocked a compiled package file.
 - **`Timestamp for this request is outside of the recvWindow`** - sync your
   Windows clock (Settings → Time & language → Sync now).

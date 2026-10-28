@@ -11,6 +11,7 @@ script; check the exact required format with your accountant.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -48,6 +49,23 @@ CREATE TABLE IF NOT EXISTS fills (
     quote_value     REAL NOT NULL,
     fee             REAL NOT NULL,
     fee_asset       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS stream_events (   -- every user-data-stream event, raw
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    received_at     TEXT NOT NULL,          -- ISO 8601, UTC (our clock)
+    environment     TEXT NOT NULL,
+    event_type      TEXT NOT NULL,          -- ORDER_TRADE_UPDATE / ACCOUNT_UPDATE / ALGO_UPDATE / ...
+    event_time      INTEGER,                -- Binance event time 'E', ms since epoch
+    symbol          TEXT,
+    payload         TEXT NOT NULL           -- the full JSON message
+);
+CREATE TABLE IF NOT EXISTS funding_payments (  -- futures funding, paid/received every 8h (tax)
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL,          -- ISO 8601, UTC (Binance event time)
+    environment     TEXT NOT NULL,
+    symbol          TEXT,
+    asset           TEXT NOT NULL,
+    amount          REAL NOT NULL           -- negative = we paid, positive = we received
 );
 CREATE TABLE IF NOT EXISTS risk_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +109,33 @@ class TradeStore:
              fill.side.value, fill.quantity, fill.price, fill.quote_value, fill.fee, fill.fee_asset),
         )
         self._db.commit()
+
+    def record_stream_event(self, event: dict) -> None:
+        """Store one user-data-stream event exactly as received."""
+        # Order and algo events carry the symbol in o.s; funding ACCOUNT_UPDATEs in S.
+        order = event.get("o")
+        symbol = order.get("s") if isinstance(order, dict) else event.get("S")
+        self._db.execute(
+            "INSERT INTO stream_events (received_at, environment, event_type, event_time, symbol, payload)"
+            " VALUES (?,?,?,?,?,?)",
+            (_now(), self.environment, event.get("e", "unknown"), event.get("E"), symbol, json.dumps(event)),
+        )
+        self._db.commit()
+
+    def record_funding(self, event_time_ms: int, symbol: str | None, asset: str, amount: float) -> None:
+        ts = datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc).isoformat()
+        self._db.execute(
+            "INSERT INTO funding_payments (timestamp, environment, symbol, asset, amount) VALUES (?,?,?,?,?)",
+            (ts, self.environment, symbol, asset, amount),
+        )
+        self._db.commit()
+
+    def count_stream_events(self) -> dict[str, int]:
+        rows = self._db.execute(
+            "SELECT event_type, COUNT(*) FROM stream_events WHERE environment=? GROUP BY event_type",
+            (self.environment,),
+        ).fetchall()
+        return dict(rows)
 
     def record_halt(self, reason: str) -> None:
         self._db.execute("INSERT INTO risk_events (timestamp, event, detail) VALUES (?,?,?)", (_now(), "HALT", reason))

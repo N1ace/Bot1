@@ -25,10 +25,19 @@ def test_no_fund_movement_code_in_src():
     assert not offenders, "Forbidden fund-movement code found:\n" + "\n".join(offenders)
 
 
-def test_only_exchange_package_imports_ccxt():
+def test_only_exchange_package_imports_exchange_libraries():
     offenders = [
         str(p.relative_to(SRC))
         for p in SRC.rglob("*.py")
-        if "exchange" not in p.parts and "import ccxt" in p.read_text(encoding="utf-8")
+        if "exchange" not in p.parts
+        and any(lib in p.read_text(encoding="utf-8")
+                for lib in ("import ccxt", "binance_sdk_", "from binance_common.configuration"))
     ]
-    assert not offenders, f"ccxt imported outside exchange/: {offenders}"
+    assert not offenders, f"exchange library imported outside exchange/: {offenders}"
+
+
+def test_futures_client_has_no_order_placement_yet():
+    """Prompt A step: no orders. Remove this test when the execution step adds them."""
+    text = (SRC / "cryptobot" / "exchange" / "futures_client.py").read_text(encoding="utf-8")
+    for call in ("new_order", "new_algo_order", "place_multiple_orders", "test_order"):
+        assert f"_api.{call}" not in text

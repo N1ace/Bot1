@@ -18,10 +18,16 @@ LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 
 
 class SecretMaskingFilter(logging.Filter):
-    def __init__(self, secrets: Iterable[str]):
+    def __init__(self, secrets: Iterable[str] = ()):
         super().__init__()
+        self._secrets: list[str] = []
+        for s in secrets:
+            self.add(s)
+
+    def add(self, secret: str) -> None:
         # Ignore very short values so we don't mask ordinary words by accident.
-        self._secrets = [s for s in secrets if s and len(s) >= 8]
+        if secret and len(secret) >= 8 and secret not in self._secrets:
+            self._secrets.append(secret)
 
     def filter(self, record: logging.LogRecord) -> bool:
         if self._secrets:
@@ -32,21 +38,32 @@ class SecretMaskingFilter(logging.Filter):
         return True
 
 
+# One shared filter, so secrets created at runtime (e.g. listenKeys) can be added.
+_mask = SecretMaskingFilter()
+
+
+def register_secret(value: str) -> None:
+    """Mask this value in all log output from now on."""
+    _mask.add(value)
+
+
 def setup_logging(level: str = "INFO", log_dir: str = "logs", secrets: Iterable[str] = ()) -> None:
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter(LOG_FORMAT)
-    mask = SecretMaskingFilter(secrets)
+    for s in secrets:
+        _mask.add(s)
 
     console = logging.StreamHandler()
     file = RotatingFileHandler(Path(log_dir) / "cryptobot.log", maxBytes=5_000_000, backupCount=10, encoding="utf-8")
     for handler in (console, file):
         handler.setFormatter(formatter)
-        handler.addFilter(mask)
+        handler.addFilter(_mask)
 
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
     root.addHandler(console)
     root.addHandler(file)
-    # CCXT / urllib3 are very chatty at DEBUG; keep them quieter.
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    # Third-party libraries are chatty; keep them to warnings.
+    for noisy in ("urllib3", "ConnectorLogger", "aiohttp"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
