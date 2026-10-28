@@ -4,7 +4,9 @@ The rest of the bot only talks to this class, never to the SDK directly, so the
 SDK can be upgraded (its major version changes often) or swapped for CCXT here.
 
 Like the spot wrapper, this is an allowlist: account reads, symbol settings,
-user-data-stream keys. Order placement is added in the execution step.
+user-data-stream keys, and a few order types (market orders, close-position
+stop-market algo orders, cancel). Callers must get every order approved by the
+RiskManager first.
 
 Notes on the SDK (binance-sdk-derivatives-trading-usds-futures):
 - It retries only GET/DELETE requests on server errors, never POST (new orders),
@@ -15,6 +17,7 @@ Notes on the SDK (binance-sdk-derivatives-trading-usds-futures):
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -23,10 +26,14 @@ from binance_common.constants import (DERIVATIVES_TRADING_USDS_FUTURES_REST_API_
                                       DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL)
 # Note: the SDK's error classes (BadRequestError, ClientError, ServerError, ...) all
 # inherit from Error directly - BadRequestError is NOT a ClientError - so catch Error.
+from binance_common.errors import BadRequestError
 from binance_common.errors import Error as BinanceApiError
 from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import \
     DerivativesTradingUsdsFutures
-from binance_sdk_derivatives_trading_usds_futures.rest_api.models import ChangeMarginTypeMarginTypeEnum
+from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
+    ChangeMarginTypeMarginTypeEnum, NewAlgoOrderAlgoTypeEnum, NewAlgoOrderClosePositionEnum, NewAlgoOrderSideEnum,
+    NewAlgoOrderTypeEnum, NewAlgoOrderWorkingTypeEnum, NewOrderNewOrderRespTypeEnum, NewOrderReduceOnlyEnum,
+    NewOrderSideEnum, NewOrderTypeEnum)
 
 from cryptobot.config import MAX_LEVERAGE_HARD_CAP, Credentials
 from cryptobot.exchange.filters import SymbolRules, to_decimal
@@ -50,6 +57,7 @@ WS_URLS = {
 # Binance error codes we handle on purpose.
 NO_NEED_TO_CHANGE_MARGIN_TYPE = -4046
 LISTEN_KEY_NOT_FOUND = -1125
+ORDER_DOES_NOT_EXIST = -2013
 
 
 class FuturesSetupError(RuntimeError):
@@ -97,6 +105,10 @@ def _dump(obj):
 
 
 class FuturesClient:
+    # How often / how long to look an order up after an unclear send result (~8 s total).
+    query_attempts = 5
+    query_delay_s = 2.0
+
     def __init__(self, environment: str, credentials: Credentials, timeout_ms: int = 10_000):
         if environment not in REST_URLS:
             raise ValueError(f"FuturesClient supports {tuple(REST_URLS)}, got {environment!r}")
@@ -207,6 +219,99 @@ class FuturesClient:
         normal = _dump(self._api.current_all_open_orders().data())
         algo = _dump(self._api.current_all_algo_open_orders().data())
         return len(normal), len(algo)
+
+    def mark_price(self, symbol: str) -> Decimal:
+        data = self._api.mark_price(symbol=symbol).data()
+        item = getattr(data, "actual_instance", data)
+        if isinstance(item, list):
+            item = item[0]
+        return to_decimal(_dump(item)["markPrice"])
+
+    # ---- orders (callers: get RiskManager approval first) ---------------------
+
+    def place_market_order(self, symbol: str, side: str, quantity: Decimal, client_order_id: str,
+                           reduce_only: bool = False) -> dict:
+        """Send a MARKET order and return Binance's view of it (status, executedQty, avgPrice).
+
+        Idempotency: the caller saves client_order_id BEFORE calling. If the request
+        fails in a way where the order MAY have been placed (timeout, HTTP 5xx), we do
+        NOT resend - we look the order up by client_order_id. Only a clear rejection
+        (HTTP 400, e.g. bad quantity) is raised as an error.
+        """
+        rules = self.rules.get(symbol)
+        if rules is None:
+            raise ValueError(f"No exchange rules loaded for {symbol} - run startup() first")
+        problems = rules.check(quantity, self.mark_price(symbol), market=True)
+        if reduce_only:
+            # Closing orders may be below the minimum order value; Binance allows that.
+            problems = [p for p in problems if "notional" not in p]
+        if problems:
+            raise ValueError(f"{symbol} {quantity}: {problems}")
+        # Build every argument BEFORE the network call: a bug here must fail loudly,
+        # not be mistaken for "the request may have reached Binance".
+        params = dict(
+            symbol=symbol,
+            side=NewOrderSideEnum(side.upper()),
+            type=NewOrderTypeEnum.MARKET,
+            # Decimal, not float: the SDK writes Decimals exactly ("0.00001"),
+            # floats can become "1e-05", which Binance rejects.
+            quantity=to_decimal(quantity),
+            reduce_only=NewOrderReduceOnlyEnum("true" if reduce_only else "false"),
+            new_client_order_id=client_order_id,
+            new_order_resp_type=NewOrderNewOrderRespTypeEnum.RESULT,
+        )
+        try:
+            self._api.new_order(**params)
+        except BadRequestError:
+            raise  # HTTP 400 = definite rejection: nothing was placed
+        except BinanceApiError as e:
+            log.warning("Order %s: unclear result (%s) - querying instead of resending", client_order_id, e)
+        except Exception as e:  # noqa: BLE001 - network timeout etc.: the order may exist
+            log.warning("Order %s: request failed (%s: %s) - querying instead of resending",
+                        client_order_id, type(e).__name__, e)
+        # The order may reach the matching engine a moment after a timeout, so one
+        # "not found" is not proof. Ask a few times before concluding it was not placed.
+        for attempt in range(self.query_attempts):
+            order = self.query_order(symbol, client_order_id)
+            if order is not None:
+                return order
+            if attempt < self.query_attempts - 1:
+                time.sleep(self.query_delay_s)
+        raise RuntimeError(f"Order {client_order_id} was not placed (not found on Binance after "
+                           f"{self.query_attempts} checks)")
+
+    def query_order(self, symbol: str, client_order_id: str) -> dict | None:
+        try:
+            return _dump(self._api.query_order(symbol=symbol, orig_client_order_id=client_order_id).data())
+        except BinanceApiError as e:
+            if api_error_code(e) == ORDER_DOES_NOT_EXIST:
+                return None
+            raise
+
+    def place_stop_market_close(self, symbol: str, side: str, trigger_price: Decimal, client_algo_id: str) -> dict:
+        """Exchange-side stop-loss that closes the WHOLE position (Algo Order API).
+
+        closePosition=true: no quantity needed, can only reduce the position.
+        workingType=MARK_PRICE: triggered by the mark price, which is harder to spike
+        than the last traded price, so fewer false stop-outs.
+        """
+        resp = self._api.new_algo_order(
+            algo_type=NewAlgoOrderAlgoTypeEnum.CONDITIONAL,
+            symbol=symbol,
+            side=NewAlgoOrderSideEnum(side.upper()),
+            type=NewAlgoOrderTypeEnum.STOP_MARKET,
+            trigger_price=to_decimal(trigger_price),
+            close_position=NewAlgoOrderClosePositionEnum("true"),
+            working_type=NewAlgoOrderWorkingTypeEnum.MARK_PRICE,
+            client_algo_id=client_algo_id,
+        )
+        return _dump(resp.data())
+
+    def open_algo_orders(self, symbol: str) -> list[dict]:
+        return _dump(self._api.current_all_algo_open_orders(symbol=symbol).data())
+
+    def cancel_algo_order(self, client_algo_id: str) -> dict:
+        return _dump(self._api.cancel_algo_order(client_algo_id=client_algo_id).data())
 
     # ---- user data stream keys -----------------------------------------------
 

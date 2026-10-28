@@ -98,6 +98,9 @@ class Fill:
     fee: float
     fee_asset: str
     timestamp: datetime          # always UTC
+    realized_pnl: float = 0.0    # futures: profit/loss realized by this fill (before fees)
+    client_order_id: str = ""
+    trade_id: str = ""
 
     @property
     def quote_value(self) -> float:

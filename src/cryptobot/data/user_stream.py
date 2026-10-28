@@ -27,6 +27,7 @@ import aiohttp
 
 from cryptobot.data.market_stream import MAX_BACKOFF_S, sleep_or_stop
 from cryptobot.exchange.futures_client import LISTEN_KEY_NOT_FOUND, FuturesClient, api_error_code
+from cryptobot.execution.fills import fill_from_order_update
 from cryptobot.logging_setup import register_secret
 from cryptobot.storage import TradeStore
 
@@ -55,6 +56,9 @@ class UserStream:
         self.keepalives = 0
         self._listen_key: str | None = None
         self._need_new_key = asyncio.Event()
+        # Set while the WebSocket is connected - wait for this before placing orders,
+        # otherwise their events could be missed.
+        self.connected = asyncio.Event()
 
     async def run(self, stop: asyncio.Event) -> None:
         keepalive = asyncio.create_task(self._keepalive_loop(stop))
@@ -86,15 +90,19 @@ class UserStream:
         url = f"{self.client.ws_url}/private/ws/{self._listen_key}"
         async with aiohttp.ClientSession() as session, session.ws_connect(url, heartbeat=20) as ws:
             log.info("User stream connected (%s/private/ws/***)", self.client.ws_url)
-            while not stop.is_set() and not self._need_new_key.is_set():
-                try:
-                    msg = await ws.receive(timeout=1)  # account events are rare; no silence timeout
-                except asyncio.TimeoutError:
-                    continue
-                if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                    raise ConnectionError(f"websocket closed ({msg.type.name})")
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    self._handle(msg.json())
+            self.connected.set()
+            try:
+                while not stop.is_set() and not self._need_new_key.is_set():
+                    try:
+                        msg = await ws.receive(timeout=1)  # account events are rare; no silence timeout
+                    except asyncio.TimeoutError:
+                        continue
+                    if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        raise ConnectionError(f"websocket closed ({msg.type.name})")
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        self._handle(msg.json())
+            finally:
+                self.connected.clear()
 
     def _handle(self, event: dict) -> None:
         kind = event.get("e", "unknown")
@@ -103,6 +111,11 @@ class UserStream:
         for asset, amount in funding_rows(event):
             self.store.record_funding(event.get("E", 0), event.get("S"), asset, amount)
             log.info("Funding payment %s %s %s", event.get("S"), amount, asset)
+        fill = fill_from_order_update(event)
+        if fill:
+            self.store.record_fill(fill)
+            log.info("Fill %s %s %s @ %s fee %s %s realized PnL %s", fill.symbol, fill.side.value, fill.quantity,
+                     fill.price, fill.fee, fill.fee_asset, fill.realized_pnl)
         if kind == "listenKeyExpired":
             log.warning("listenKey expired - creating a new one")
             self._need_new_key.set()

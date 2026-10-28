@@ -36,8 +36,17 @@ def test_only_exchange_package_imports_exchange_libraries():
     assert not offenders, f"exchange library imported outside exchange/: {offenders}"
 
 
-def test_futures_client_has_no_order_placement_yet():
-    """Prompt A step: no orders. Remove this test when the execution step adds them."""
+def test_futures_client_order_allowlist():
+    """Only these SDK calls may change orders. Adding one is a deliberate, reviewed change."""
+    import re
     text = (SRC / "cryptobot" / "exchange" / "futures_client.py").read_text(encoding="utf-8")
-    for call in ("new_order", "new_algo_order", "place_multiple_orders", "test_order"):
-        assert f"_api.{call}" not in text
+    calls = set(re.findall(r"self\._api\.(\w+)\(", text))
+    order_calls = {c for c in calls if any(w in c for w in ("order", "cancel", "modify", "batch"))}
+    assert order_calls == {"new_order", "query_order", "new_algo_order", "current_all_open_orders",
+                           "current_all_algo_open_orders", "cancel_algo_order"}
+
+
+def test_stop_orders_close_position_on_mark_price():
+    text = (SRC / "cryptobot" / "exchange" / "futures_client.py").read_text(encoding="utf-8")
+    assert 'close_position=NewAlgoOrderClosePositionEnum("true")' in text
+    assert "working_type=NewAlgoOrderWorkingTypeEnum.MARK_PRICE" in text

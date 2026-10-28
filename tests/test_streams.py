@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from cryptobot.data.market_stream import ClosedCandle, MarkPrice, parse_message, stream_url
 from cryptobot.data.user_stream import funding_rows
+from cryptobot.execution.fills import fill_from_order_update
 from cryptobot.storage import TradeStore
 
 
@@ -47,6 +48,45 @@ FUNDING_EVENT = {"e": "ACCOUNT_UPDATE", "E": 1793116800123, "T": 1793116800100, 
 def test_funding_rows():
     assert funding_rows(FUNDING_EVENT) == [("USDT", -0.5)]
     assert funding_rows({"e": "ACCOUNT_UPDATE", "a": {"m": "ORDER", "B": []}}) == []
+
+
+TRADE_EVENT = {"e": "ORDER_TRADE_UPDATE", "E": 1793150000100, "T": 1793150000090, "o": {
+    "s": "BTCUSDT", "c": "cbtest-entry-abc", "S": "BUY", "o": "MARKET", "q": "0.0007", "X": "FILLED",
+    "x": "TRADE", "i": 123456, "l": "0.0007", "z": "0.0007", "L": "80700.5", "N": "USDT", "n": "0.02824517",
+    "T": 1793150000090, "t": 987, "rp": "0", "ap": "80700.5"}}
+
+
+def test_fill_from_trade_event():
+    fill = fill_from_order_update(TRADE_EVENT)
+    assert fill.symbol == "BTCUSDT" and fill.side.value == "buy"
+    assert fill.quantity == 0.0007 and fill.price == 80700.5
+    assert fill.fee == 0.02824517 and fill.fee_asset == "USDT"
+    assert fill.client_order_id == "cbtest-entry-abc" and fill.trade_id == "987"
+
+
+def test_non_trade_order_events_are_not_fills():
+    new = {**TRADE_EVENT, "o": {**TRADE_EVENT["o"], "x": "NEW", "X": "NEW"}}
+    assert fill_from_order_update(new) is None
+    assert fill_from_order_update({"e": "ALGO_UPDATE", "o": {}}) is None
+
+
+def test_fills_saved_and_found_by_client_id():
+    store = TradeStore(":memory:", "demo", "futures", "FUTURES")
+    store.record_fill(fill_from_order_update(TRADE_EVENT))
+    rows = store.fills_for(["cbtest-entry-abc"])
+    assert len(rows) == 1 and rows[0]["fee"] == 0.02824517 and rows[0]["realized_pnl"] == 0
+
+
+def test_old_database_gets_new_fill_columns(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE fills (id INTEGER PRIMARY KEY, order_id TEXT, timestamp TEXT, environment TEXT,"
+                " symbol TEXT, side TEXT, quantity REAL, price REAL, quote_value REAL, fee REAL, fee_asset TEXT)")
+    con.close()
+    store = TradeStore(db, "demo", "futures", "FUTURES")
+    store.record_fill(fill_from_order_update(TRADE_EVENT))
+    assert store.fills_for(["cbtest-entry-abc"])[0]["trade_id"] == "987"
 
 
 def test_store_records_events_and_funding():

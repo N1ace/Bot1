@@ -41,7 +41,9 @@ futures:
   margin_type: ISOLATED  # only ISOLATED is allowed
 
 risk:
-  max_order_value: 50          # max value of ONE order, in USDT
+  max_order_value: 100         # max value of ONE order (position size), in USDT.
+                               # BTCUSDT's minimum order is 50 USDT (demo), so one
+                               # minimum-size BTC order is ~56 USDT.
   max_open_positions: 2        # max number of symbols held at the same time
   max_daily_loss: 30           # USDT; when today's loss reaches this, stop opening trades
   require_stop_loss: true      # every entry must come with a stop-loss price
