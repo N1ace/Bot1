@@ -3,6 +3,8 @@
 **Current focus: Binance USDⓈ-M perpetual futures, DEMO environment.**
 Read [binance-futures-bot-reference.md](binance-futures-bot-reference.md) for the decisions,
 roadmap and official doc links. Fetch the official Binance docs listed there instead of guessing.
+Strategy and risk model: [strategy-risk-spec.md](strategy-risk-spec.md) (daily Donchian
+ensemble, 6 risk layers, validation gates). Live trading only after its section 7 gates pass.
 
 This repo holds two things side by side:
 

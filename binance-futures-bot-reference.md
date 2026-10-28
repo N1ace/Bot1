@@ -23,6 +23,9 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 **Next:** risk manager (0.5% risk sizing, liquidation buffer), the risk-reviewer, then Prompt B
 (first demo test trade).
 
+**Strategy & risk:** see `strategy-risk-spec.md` (core: daily Donchian ensemble,
+vol-targeted, 6-layer risk model, regime overlay, validation gates, default config).
+
 ---
 
 ## 1. Decisions so far
