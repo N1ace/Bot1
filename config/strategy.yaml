@@ -1,0 +1,40 @@
+# Strategy + portfolio risk settings (strategy-risk-spec.md section 9).
+# Used by the backtester now and by the live engine later.
+
+strategy:
+  name: donchian_ensemble_daily
+  timeframe: 1d
+  lookbacks: [10, 20, 30, 60, 90, 150, 250]
+  allow_shorts: false          # test separately at 0.5x weight
+  short_weight: 0.5
+  rebalance_threshold: 0.20    # only trade when the target differs from the position by > 20%
+  atr_n: 20
+  k_atr: 3.0                   # catastrophe stop = 3 x ATR(20) from the price at entry
+  vol_window: 60               # days of returns used for realised volatility and correlation
+
+symbols:
+  core: [BTCUSDT, ETHUSDT]
+
+risk:
+  risk_per_trade: 0.005        # 0.5%; the live ramp starts at 0.0025
+  vol_target_asset: 0.15
+  slip_buffer: {BTCUSDT: 0.25, ETHUSDT: 0.25, default: 0.5}
+  isolated_leverage: 2
+  stop_to_liq_max: 0.33
+  max_eff_leverage: 1.5
+  max_positions: 4
+  max_heat: 0.02
+  cluster: [BTCUSDT, ETHUSDT, SOLUSDT]
+  cluster_heat: 0.0125
+  corr_floor: 0.7
+  max_net_notional: 1.25
+  daily_loss: 0.02
+  weekly_loss: 0.04
+  dd_steps: {0.10: 0.5, 0.15: 0.25}
+  dd_stop: 0.20
+  losing_streak: {count: 6, mult: 0.5, trades: 10}
+
+costs:
+  taker: 0.0005
+  maker: 0.0002
+  slippage_bps: {BTCUSDT: 3, ETHUSDT: 3, default: 8}

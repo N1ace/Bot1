@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS funding_payments (  -- futures funding, paid/received
     asset           TEXT NOT NULL,
     amount          REAL NOT NULL           -- negative = we paid, positive = we received
 );
+CREATE TABLE IF NOT EXISTS risk_state (       -- circuit-breaker memory, one row per environment/strategy
+    name            TEXT PRIMARY KEY,
+    updated_at      TEXT NOT NULL,
+    state           TEXT NOT NULL           -- JSON
+);
 CREATE TABLE IF NOT EXISTS risk_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp       TEXT NOT NULL,
@@ -173,6 +178,16 @@ class TradeStore:
             (self.environment,),
         ).fetchall()
         return dict(rows)
+
+    def save_risk_state(self, name: str, state: dict) -> None:
+        """Persist circuit-breaker state (high-water mark, halts, streaks) across restarts."""
+        self._db.execute("INSERT OR REPLACE INTO risk_state (name, updated_at, state) VALUES (?,?,?)",
+                         (name, _now(), json.dumps(state)))
+        self._db.commit()
+
+    def load_risk_state(self, name: str) -> dict | None:
+        row = self._db.execute("SELECT state FROM risk_state WHERE name=?", (name,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def record_halt(self, reason: str) -> None:
         self._db.execute("INSERT INTO risk_events (timestamp, event, detail) VALUES (?,?,?)", (_now(), "HALT", reason))

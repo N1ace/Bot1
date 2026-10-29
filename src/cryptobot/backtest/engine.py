@@ -78,6 +78,7 @@ class Position:
     qty: float = 0.0
     entry_price: float = 0.0       # average entry
     stop: float | None = None
+    trade_pnl: float = 0.0         # realized PnL - fees + funding since this position was opened
 
 
 @dataclass
@@ -86,6 +87,8 @@ class PortfolioState:
     equity: float
     positions: dict[str, Position]
     date: pd.Timestamp
+    closed_trades: list[tuple[str, float]] = field(default_factory=list)   # (symbol, pnl) closed today
+    stopped_out: set[str] = field(default_factory=set)                     # symbols whose stop hit today
 
 
 @dataclass
@@ -160,6 +163,12 @@ class Backtester:
                 pos.entry_price = price                      # new position or flipped
             elif abs(new_qty) > abs(pos.qty):                # added to the position: average in
                 pos.entry_price = (pos.entry_price * abs(pos.qty) + price * abs(side_qty)) / abs(new_qty)
+            pos.trade_pnl += realized - fee
+            if new_qty == 0:
+                closed_today.append((symbol, pos.trade_pnl))
+                pos.trade_pnl = 0.0
+            if reason.startswith("stop"):
+                stopped_today.add(symbol)
             pos.qty = new_qty
             cash += realized - fee
             totals["fees"] += fee
@@ -175,12 +184,15 @@ class Backtester:
                 return
             amount = -pos.qty * price * rate          # long + positive rate -> pays (negative amount)
             cash += amount
+            pos.trade_pnl += amount
             totals["funding"] += amount
             payments.append({"time": when, "symbol": symbol, "qty": pos.qty, "price": price,
                              "rate": rate, "amount": amount})
 
         for date in dates:
             day_end = date + pd.Timedelta(days=1)
+            closed_today: list[tuple[str, float]] = []
+            stopped_today: set[str] = set()
             for symbol, df in self.bars.items():
                 if date not in df.index:
                     continue
@@ -211,7 +223,12 @@ class Backtester:
                     if delta != 0 and (reducing_to_zero or notional >= cfg.min_notional.get(symbol, 0)):
                         slip = cfg.slip(symbol)
                         price = bar["open"] * (1 + slip if delta > 0 else 1 - slip)
-                        fill(symbol, date, delta, price, "signal", bar["open"])
+                        if pos.qty != 0 and want != 0 and math.copysign(1, want) != math.copysign(1, pos.qty):
+                            # A flip (long -> short) is a close and a new open: two trades, two records.
+                            fill(symbol, date, -pos.qty, price, "signal", bar["open"])
+                            fill(symbol, date, want, price, "signal", bar["open"])
+                        else:
+                            fill(symbol, date, delta, price, "signal", bar["open"])
                     if pos.qty != 0:
                         pos.stop = target.stop
                     else:
@@ -262,14 +279,20 @@ class Backtester:
             equity_curve[date] = equity
             if liquidated:
                 continue  # account blown: no new orders
-            state = PortfolioState(equity=equity, positions=positions, date=date)
-            for symbol, df in self.bars.items():
-                if date not in df.index:
-                    continue
-                history = df.loc[:date]          # nothing after today's close
-                target = strategy(symbol, history, state)
-                if target is not None:
-                    pending[symbol] = target
+            state = PortfolioState(equity=equity, positions=positions, date=date,
+                                   closed_trades=closed_today, stopped_out=stopped_today)
+            # Only bars up to today's close are handed over - never anything later.
+            histories = {s: df.loc[:date] for s, df in self.bars.items() if date in df.index}
+            if hasattr(strategy, "targets"):
+                # Portfolio strategy: decides all symbols together (needed for portfolio caps).
+                for symbol, target in strategy.targets(histories, state).items():
+                    if target is not None:
+                        pending[symbol] = target
+            else:
+                for symbol, history in histories.items():
+                    target = strategy(symbol, history, state)
+                    if target is not None:
+                        pending[symbol] = target
 
         totals["liquidated"] = liquidated
         return BacktestResult(
