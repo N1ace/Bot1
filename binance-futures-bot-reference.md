@@ -27,6 +27,9 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 **Next:** risk manager (0.5% risk sizing, liquidation buffer), the risk-reviewer, then Prompt B
 (first demo test trade).
 
+**Roadmap, principles & advisor design:** see `bot-roadmap-and-principles.md`
+(ranked priorities, allowed tactics, levels 0–6, bot-gives-tips design).
+
 **Strategy & risk:** see `strategy-risk-spec.md` (core: daily Donchian ensemble,
 vol-targeted, 6-layer risk model, regime overlay, validation gates, default config).
 

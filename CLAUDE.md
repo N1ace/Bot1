@@ -5,6 +5,9 @@ Read [binance-futures-bot-reference.md](binance-futures-bot-reference.md) for th
 roadmap and official doc links. Fetch the official Binance docs listed there instead of guessing.
 Strategy and risk model: [strategy-risk-spec.md](strategy-risk-spec.md) (daily Donchian
 ensemble, 6 risk layers, validation gates). Live trading only after its section 7 gates pass.
+Levels 0–6, allowed tactics and the advisor (bot suggests, owner decides):
+[bot-roadmap-and-principles.md](bot-roadmap-and-principles.md). Never skip a level; the bot
+never raises risk, leverage, parameters or its level by itself.
 
 This repo holds two things side by side:
 
