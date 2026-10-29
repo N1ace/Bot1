@@ -34,6 +34,7 @@ from cryptobot.notifications.telegram import TelegramNotifier
 from cryptobot.observer import health as health_mod
 from cryptobot.observer import regime as regime_mod
 from cryptobot.observer.positioning import update_positioning
+from cryptobot.reporting import trades as trades_report
 
 log = logging.getLogger(__name__)
 
@@ -41,21 +42,42 @@ MARKET_DB = "data/market.sqlite"
 REPORTS_DIR = Path("reports")
 
 
-def handle_commands(advisor: AdvisorStore, texts: list[str]) -> list[str]:
+HELP = ("Commands: /today /yesterday /week /month /day 2026-10-28 (trades + stats), "
+        "/stats [week|month|all], /pending, /approve N, /reject N. "
+        "I only report and suggest - settings change only when you edit the config. "
+        "(Commands are read once a day at the daily run.)")
+
+
+def handle_commands(advisor: AdvisorStore, texts: list[str], trades_db: str = ":memory:") -> list[str]:
     """Owner commands from Telegram -> reply texts. Approval only RECORDS the answer."""
     replies = []
     for text in texts:
-        m = re.fullmatch(r"/(approve|reject)\s+#?(\d+)", text.strip(), flags=re.I)
+        cmd = text.strip()
+        m = re.fullmatch(r"/(approve|reject)\s+#?(\d+)", cmd, flags=re.I)
+        period = re.fullmatch(r"/(today|yesterday|week|month)", cmd, flags=re.I)
+        day = re.fullmatch(r"/day\s+(\d{4}-\d{2}-\d{2})", cmd, flags=re.I)
+        stats = re.fullmatch(r"/stats(?:\s+(today|yesterday|week|month|all))?", cmd, flags=re.I)
         if m:
             s = advisor.decide(int(m.group(2)), approved=m.group(1).lower() == "approve")
             replies.append(approval_reply(s) if s else f"No suggestion #{m.group(2)}.")
-        elif text.strip().lower() in ("/pending", "/status"):
+        elif cmd.lower() in ("/pending", "/status"):
             pending = advisor.pending()
             replies.append("No suggestions waiting." if not pending else
                            "\n".join(f"#{s['id']} {s['title']}" for s in pending))
+        elif period:
+            start, end, label = trades_report.period_range(period.group(1).lower())
+            replies.append(trades_report.report(trades_db, start, end, label))
+        elif day:
+            try:
+                start, end, label = trades_report.day_range(date.fromisoformat(day.group(1)))
+                replies.append(trades_report.report(trades_db, start, end, label))
+            except ValueError:
+                replies.append(f"Not a valid date: {day.group(1)}")
+        elif stats:
+            start, end, label = trades_report.period_range((stats.group(1) or "month").lower())
+            replies.append(trades_report.report(trades_db, start, end, label, what="stats"))
         else:
-            replies.append("I understand: /approve N, /reject N, /pending. I only report and suggest - "
-                           "settings change only when you edit the config.")
+            replies.append(HELP)
     return replies
 
 
@@ -79,7 +101,7 @@ def run_daily(cfg: Config, now: pd.Timestamp | None = None, send: bool = True) -
 
         offset, texts = notifier.owner_commands(int(advisor.get("telegram_offset", "0")))
         advisor.set("telegram_offset", str(offset))
-        for reply in handle_commands(advisor, texts):
+        for reply in handle_commands(advisor, texts, cfg.sqlite_path):
             notifier.send(reply)
 
         require_level(cfg.level, "report")

@@ -3,6 +3,11 @@
     python -m cryptobot daily            # the once-a-day job (level 0: data + market state + report)
     python -m cryptobot daily --no-send  # same, but don't send to Telegram
     python -m cryptobot                  # futures demo: startup routine + streams for --minutes
+
+    python -m cryptobot trades --period today|yesterday|week|month|all
+    python -m cryptobot trades --day 2026-10-28
+    python -m cryptobot trades --from 2026-10-01 --to 2026-10-31
+    python -m cryptobot stats  --period month          # same options; profit/loss, win rate, fees, funding
 """
 
 from __future__ import annotations
@@ -19,14 +24,21 @@ from cryptobot.logging_setup import setup_logging
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="cryptobot")
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "daily"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "daily", "trades", "stats"])
     parser.add_argument("--config", default="config/config.yaml", help="path to the YAML config")
     parser.add_argument("--minutes", type=float, default=10, help="futures: how long to run the streams")
     parser.add_argument("--no-send", action="store_true", help="daily: don't send to Telegram")
+    parser.add_argument("--period", default="week", choices=["today", "yesterday", "week", "month", "all"])
+    parser.add_argument("--day", help="trades/stats for one UTC day, YYYY-MM-DD")
+    parser.add_argument("--from", dest="date_from", help="first UTC day, YYYY-MM-DD")
+    parser.add_argument("--to", dest="date_to", help="last UTC day, YYYY-MM-DD (default: today)")
     args = parser.parse_args()
 
     # Windows consoles default to an old code page; Binance can return non-ASCII names.
     sys.stdout.reconfigure(encoding="utf-8")
+
+    if args.command in ("trades", "stats"):
+        return _history(args)
 
     load_dotenv()  # reads .env from the current folder into environment variables
     try:
@@ -56,6 +68,28 @@ def main() -> int:
         return 130
     log.error("Mode %r is not implemented yet", cfg.mode)
     return 1
+
+
+def _history(args) -> int:
+    """Read-only: trades / statistics from the trade log. Needs no keys and no level."""
+    from datetime import date
+
+    from cryptobot.reporting import trades as tr
+
+    try:
+        cfg = load_config(args.config)
+        if args.day:
+            start, end, label = tr.day_range(date.fromisoformat(args.day))
+        elif args.date_from:
+            last = date.fromisoformat(args.date_to) if args.date_to else date.today()
+            start, end, label = tr.custom_range(date.fromisoformat(args.date_from), last)
+        else:
+            start, end, label = tr.period_range(args.period)
+    except (ConfigError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    print(tr.report(cfg.sqlite_path, start, end, label, what=args.command))
+    return 0
 
 
 if __name__ == "__main__":
