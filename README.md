@@ -114,6 +114,10 @@ python scripts/download_history.py        # BTCUSDT + ETHUSDT daily candles, mar
 python scripts/run_backtest.py            # buy & hold sanity check, with and without funding
 ```
 
+- `--extended` (download and backtest) adds history from 2017-08: Binance spot candles before
+  futures existed, Bybit funding 2018-19, and an assumed 0.01%/8h before that (labelled in output).
+- `python scripts/validate.py` runs the section-7 honesty check: walk-forward (train 3y / test 6m),
+  +-20% stability, Deflated Sharpe over every variant ever tried; saves `reports/validation-<date>.md`.
 - History comes from data.binance.vision (every zip checked against its SHA-256) plus the
   public REST API for the latest weeks, stored in `data/market.sqlite`. Re-runs fetch only what's new.
 - The engine (`src/cryptobot/backtest/engine.py`) works day by day: funding at real settlement

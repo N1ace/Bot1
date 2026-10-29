@@ -34,6 +34,7 @@ import requests
 log = logging.getLogger(__name__)
 
 VISION_BASE = "https://data.binance.vision/data/futures/um/monthly"
+VISION_SPOT_BASE = "https://data.binance.vision/data/spot/monthly"
 REST_BASE = "https://fapi.binance.com"
 DAY_MS = 86_400_000
 
@@ -43,6 +44,8 @@ DATASETS = {
     "markPriceKlines": ("markPriceKlines/{s}/1d/{s}-1d-{ym}.zip", "mark"),
     "fundingRate": ("fundingRate/{s}/{s}-fundingRate-{ym}.zip", "funding"),
 }
+# Spot candles (from 2017-08) - only used to extend backtests to before futures existed.
+SPOT_DATASET = ("klines/{s}/1d/{s}-1d-{ym}.zip", "spot")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars (
@@ -141,17 +144,25 @@ class MarketDataStore:
             added["rest"] += self._rest_top_up(symbol)
         return added
 
+    def update_spot(self, symbols: list[str], start: str = "2017-08", end: str = "2019-12") -> int:
+        """Spot daily candles (stored as kind 'spot'), used before futures history begins."""
+        return sum(self._monthly_file(s, "spot", ym) for s in symbols for ym in months(start, end))
+
     def _monthly_file(self, symbol: str, dataset: str, ym: str) -> int:
-        template, kind = DATASETS[dataset]
+        if dataset == "spot":
+            (template, kind), base, prefix = SPOT_DATASET, VISION_SPOT_BASE, "spot/"
+        else:
+            (template, kind), base, prefix = DATASETS[dataset], VISION_BASE, ""
         rel = template.format(s=symbol, ym=ym)
-        if self._db.execute("SELECT 1 FROM downloads WHERE file=?", (rel,)).fetchone():
+        key = prefix + rel                     # spot and futures paths look alike: keep keys apart
+        if self._db.execute("SELECT 1 FROM downloads WHERE file=?", (key,)).fetchone():
             return 0
-        resp = self.http.get(f"{VISION_BASE}/{rel}", timeout=60)
+        resp = self.http.get(f"{base}/{rel}", timeout=60)
         if resp.status_code == 404:
-            log.info("Not available (symbol not listed yet?): %s", rel)
+            log.info("Not available (symbol not listed yet?): %s", key)
             return 0
         resp.raise_for_status()
-        checksum = self.http.get(f"{VISION_BASE}/{rel}.CHECKSUM", timeout=60)
+        checksum = self.http.get(f"{base}/{rel}.CHECKSUM", timeout=60)
         checksum.raise_for_status()
         sha = verify_checksum(resp.content, checksum.text)
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -165,9 +176,9 @@ class MarketDataStore:
             self._db.executemany("INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?,?)",
                                  [(symbol, kind, *r) for r in rows])
         self._db.execute("INSERT INTO downloads VALUES (?,?,?,?)",
-                         (rel, sha, len(rows), datetime.now(timezone.utc).isoformat()))
+                         (key, sha, len(rows), datetime.now(timezone.utc).isoformat()))
         self._db.commit()
-        log.info("Downloaded %s (%d rows, checksum OK)", rel, len(rows))
+        log.info("Downloaded %s (%d rows, checksum OK)", key, len(rows))
         return len(rows)
 
     def _rest_top_up(self, symbol: str) -> int:

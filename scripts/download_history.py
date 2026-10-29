@@ -22,12 +22,21 @@ def main() -> int:
     parser.add_argument("symbols", nargs="*", default=["BTCUSDT", "ETHUSDT"])
     parser.add_argument("--start", default="2020-01", help="first month, YYYY-MM")
     parser.add_argument("--db", default="data/market.sqlite")
+    parser.add_argument("--extended", action="store_true",
+                        help="also fetch spot candles from 2017-08 and pre-2020 funding (Binance REST + Bybit)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s")
 
     store = MarketDataStore(args.db)
     added = store.update(args.symbols, start=args.start)
     print(f"\nRows added: {added}")
+    if args.extended:
+        from cryptobot.backtest.history_ext import ExtendedHistory
+        ext = ExtendedHistory(store, args.db)
+        print(f"Extended history added: {ext.update(args.symbols)}")
+        for s in args.symbols:
+            for line in ext.coverage(s):
+                print("  " + line)
     print("\n=== Stored history ===")
     for symbol, kind, count, first, last in store.summary():
         fmt = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")

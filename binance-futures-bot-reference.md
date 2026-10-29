@@ -23,6 +23,8 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 | Live account size (planned) | ~20,000 USD |
 | Spec steps 1–2 (data + backtester) | ✅ 2026-10-28: BTC/ETH 2020-01→2026-10 stored; engine sanity-checked |
 | Spec step 5 (funding layer + regime overlay) | ✅ 2026-10-30 built + risk-reviewed. Spec defaults: Sharpe 0.34 → 0.56, max DD −2.8% → −1.7%; vol-target sizing: 0.50 → 0.62, DD −20% → −16%. Still below the 0.8 gate |
+| Extended history | ✅ 2026-10-30: 2017-08 → today (spot prices pre-2020; funding Bybit 2018-19, assumed before) |
+| Spec step 6 (validation) | ✅ built 2026-10-30. Result: **3 of 6 gates FAIL** — out-of-sample Sharpe 0.52 (need 0.8), unstable at ±20%, Deflated Sharpe 0.67 (need 0.95). Not ready for real money |
 | Bot level | **0 – Observer** since 2026-10-29: daily job (03:30 Israel time), Telegram reports + tips, suggestions with /approve. Gate: 14 clean days |
 | Spec steps 3–4 (strategy + risk layers 1–4) | ✅ 2026-10-29 built + risk-reviewed. Backtest 2020–26 (20K, spec defaults): +2.6% total, max DD −2.8%, Sharpe 0.34 — fails gate "Sharpe > 0.8". Open decision: trailing vs. fixed catastrophe stop, risk level |
 

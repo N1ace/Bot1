@@ -17,7 +17,7 @@ import sys
 
 import pandas as pd
 
-from cryptobot.backtest.data import MarketDataStore
+from cryptobot.backtest.loading import load_history
 from cryptobot.backtest.engine import Backtester, BacktestConfig, buy_and_hold
 from cryptobot.strategies.donchian_portfolio import DonchianPortfolio, load_overlay_config, load_strategy_config
 
@@ -26,7 +26,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--strategy", choices=["donchian", "buyhold"], default="donchian")
     parser.add_argument("--symbols", nargs="*", default=None)
-    parser.add_argument("--start", default="2020-01-01")
+    parser.add_argument("--start", default=None, help="first day (default: start of the data)")
+    parser.add_argument("--extended", action="store_true", help="history from 2017-08 (spot + proxy funding)")
     parser.add_argument("--end", default=None)
     parser.add_argument("--equity", type=float, default=20_000)
     parser.add_argument("--r", type=float, default=None, help="risk per trade, overrides config")
@@ -45,14 +46,12 @@ def main() -> int:
         strat_cfg = dataclasses.replace(strat_cfg, allow_shorts=True)
     symbols = args.symbols or raw["symbols"]["core"]
 
-    store = MarketDataStore(args.db)
-    bars = {s: store.bars(s, "trade") for s in symbols}
-    marks = {s: store.bars(s, "mark") for s in symbols}
-    funding = {s: store.funding(s) for s in symbols}
-    store.close()
-    if any(df.empty for df in bars.values()):
-        print("Missing data - run scripts/download_history.py first", file=sys.stderr)
+    try:
+        hist = load_history(symbols, args.db, extended=args.extended)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
         return 1
+    bars, marks, funding = hist.bars, hist.marks, hist.funding
 
     costs = raw["costs"]
     bt_cfg = BacktestConfig(initial_equity=args.equity, taker_fee=costs["taker"], maker_fee=costs["maker"],
@@ -64,17 +63,15 @@ def main() -> int:
         overlay_cfg = load_overlay_config(raw)
         if args.no_overlay:
             overlay_cfg = dataclasses.replace(overlay_cfg, enabled=False)
-        btc = bars.get("BTCUSDT")
-        if btc is None:
-            store = MarketDataStore(args.db)
-            btc = store.bars("BTCUSDT", "trade")
-            store.close()
-        strategy = DonchianPortfolio(bars, strat_cfg, risk_cfg, funding=funding, overlay_cfg=overlay_cfg, btc_bars=btc)
+        strategy = DonchianPortfolio(bars, strat_cfg, risk_cfg, funding=funding, overlay_cfg=overlay_cfg,
+                                     btc_bars=hist.btc)
         title = (f"Donchian ensemble {list(strat_cfg.lookbacks)}, risk/trade {risk_cfg.risk_per_trade:.2%}, "
                  f"{'long+short' if strat_cfg.allow_shorts else 'long only'}, "
                  f"overlay {'on' if overlay_cfg.enabled else 'off'}")
     res = Backtester(bt_cfg, bars, funding, marks).run(strategy, start=args.start, end=args.end)
 
+    for note in hist.notes:
+        print(f"data: {note}")
     for w in getattr(strategy, "overlay_warnings", []):
         print(f"WARNING: {w}")
     m, t = res.metrics(), res.totals
