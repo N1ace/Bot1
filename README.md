@@ -93,6 +93,18 @@ powershell -ExecutionPolicy Bypass -File scripts\install_daily_task.ps1 -Remove 
 - Answer suggestions in Telegram with `/approve N` or `/reject N` (read at the next daily run).
   Approving only **records** your answer - the bot then tells you which config line to change.
 - Level 0 exit gate: 14 clean daily runs in a row (no crash, no data gap).
+
+### Trades and statistics
+
+```powershell
+python -m cryptobot trades --period today      # or yesterday / week / month / all
+python -m cryptobot trades --day 2026-10-28
+python -m cryptobot trades --from 2026-10-01 --to 2026-10-31
+python -m cryptobot stats --period month       # profit/loss, trades, win rate, fees, funding, best/worst
+```
+
+Telegram (answered at the next daily run): `/today` `/yesterday` `/week` `/month` `/day 2026-10-28`
+`/stats month`. Days are UTC. Paper, demo and live results are always shown separately.
 - Telegram setup: create a bot with @BotFather, put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`.
 
 ## Backtesting (strategy-risk-spec.md steps 1-2)

@@ -52,7 +52,8 @@ def require_level(level: int, action: str) -> None:
 
 def check_level_config(level: int, environment: str) -> str | None:
     """Return an error message if level and environment don't fit together, else None."""
-    if not isinstance(level, int) or not 0 <= level <= 6:
+    # bool is a subclass of int in Python: `level: true` must not mean level 1
+    if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 6:
         return f"level must be a whole number 0-6, got {level!r}"
     if level > HIGHEST_AVAILABLE_LEVEL:
         return f"level {level_name(level)} is not built yet (highest available: {HIGHEST_AVAILABLE_LEVEL})"

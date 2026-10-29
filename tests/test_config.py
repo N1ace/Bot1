@@ -97,7 +97,7 @@ def test_level_defaults_to_observer():
     assert _build(FUT).level == 0
 
 
-@pytest.mark.parametrize("level", [3, 4, 5, 6, 7, -1, "2"])
+@pytest.mark.parametrize("level", [3, 4, 5, 6, 7, -1, "2", True])
 def test_unavailable_or_invalid_levels_refused(level):
     with pytest.raises(ConfigError):
         _build({**FUT, "level": level})

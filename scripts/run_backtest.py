@@ -19,7 +19,7 @@ import pandas as pd
 
 from cryptobot.backtest.data import MarketDataStore
 from cryptobot.backtest.engine import Backtester, BacktestConfig, buy_and_hold
-from cryptobot.strategies.donchian_portfolio import DonchianPortfolio, load_strategy_config
+from cryptobot.strategies.donchian_portfolio import DonchianPortfolio, load_overlay_config, load_strategy_config
 
 
 def main() -> int:
@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--shorts", action="store_true")
     parser.add_argument("--stop-fill", default="spec_strict", choices=["spec_strict", "open_if_gap"])
     parser.add_argument("--no-funding", action="store_true")
+    parser.add_argument("--no-overlay", action="store_true", help="switch off regime overlay + funding layer")
     parser.add_argument("--config", default="config/strategy.yaml")
     parser.add_argument("--db", default="data/market.sqlite")
     args = parser.parse_args()
@@ -60,11 +61,22 @@ def main() -> int:
     if args.strategy == "buyhold":
         strategy, title = buy_and_hold(), "Buy & hold"
     else:
-        strategy = DonchianPortfolio(bars, strat_cfg, risk_cfg)
+        overlay_cfg = load_overlay_config(raw)
+        if args.no_overlay:
+            overlay_cfg = dataclasses.replace(overlay_cfg, enabled=False)
+        btc = bars.get("BTCUSDT")
+        if btc is None:
+            store = MarketDataStore(args.db)
+            btc = store.bars("BTCUSDT", "trade")
+            store.close()
+        strategy = DonchianPortfolio(bars, strat_cfg, risk_cfg, funding=funding, overlay_cfg=overlay_cfg, btc_bars=btc)
         title = (f"Donchian ensemble {list(strat_cfg.lookbacks)}, risk/trade {risk_cfg.risk_per_trade:.2%}, "
-                 f"{'long+short' if strat_cfg.allow_shorts else 'long only'}")
+                 f"{'long+short' if strat_cfg.allow_shorts else 'long only'}, "
+                 f"overlay {'on' if overlay_cfg.enabled else 'off'}")
     res = Backtester(bt_cfg, bars, funding, marks).run(strategy, start=args.start, end=args.end)
 
+    for w in getattr(strategy, "overlay_warnings", []):
+        print(f"WARNING: {w}")
     m, t = res.metrics(), res.totals
     fills = res.fills
     print(f"{title}\n{', '.join(symbols)} | start {args.equity:,.0f} USDT | stops: {args.stop_fill} | "

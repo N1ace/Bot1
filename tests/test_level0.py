@@ -130,11 +130,20 @@ def test_daily_report_contains_all_five_sections():
 def test_telegram_ignores_commands_from_other_chats(monkeypatch):
     n = TelegramNotifier(enabled=True, token="123:abcdefghij", chat_id="5377682705")
     monkeypatch.setattr(n, "_call", lambda method, **p: {"ok": True, "result": [
-        {"update_id": 10, "message": {"chat": {"id": 5377682705}, "text": "/approve 1"}},
-        {"update_id": 11, "message": {"chat": {"id": 999}, "text": "/approve 2"}},
+        {"update_id": 10, "message": {"chat": {"id": 5377682705}, "from": {"id": 5377682705}, "text": "/approve 1"}},
+        {"update_id": 11, "message": {"chat": {"id": 999}, "from": {"id": 999}, "text": "/approve 2"}},
+        {"update_id": 12, "message": {"chat": {"id": 5377682705}, "from": {"id": 42}, "text": "/approve 3"}},
     ]})
     offset, texts = n.owner_commands(0)
-    assert texts == ["/approve 1"] and offset == 12
+    assert texts == ["/approve 1"] and offset == 13
+
+
+def test_second_approval_says_already_decided():
+    a = AdvisorStore(":memory:")
+    sid = a.add_suggestion("other", "X", "e", "x: 1")
+    handle_commands(a, [f"/reject {sid}"])
+    assert handle_commands(a, [f"/approve {sid}"]) == [f"#{sid} was already rejected - nothing changed."]
+    assert a.suggestion(sid)["status"] == "rejected"
 
 
 def test_telegram_disabled_without_credentials():

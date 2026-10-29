@@ -34,6 +34,30 @@ risk:
   dd_stop: 0.20
   losing_streak: {count: 6, mult: 0.5, trades: 10}
 
+funding:                       # layer 5: funding paid BY the position, per year
+  halve_above_ann: 0.30        # > 30%/yr -> half size
+  exit_above_ann: 0.60         # > 60%/yr -> close (unless the signal is at full strength)
+
+regime:                        # section 4: adjust size by market state, never switch strategy
+  enabled: true
+  btc_sma: 200
+  sma_slope_days: 20
+  er_n: 20
+  er_trend: 0.30
+  er_chop: 0.15
+  adx_n: 14
+  adx_trend: 25
+  adx_chop: 18
+  chop_mult: 0.5               # all multipliers must be 0-1: the overlay can only shrink positions
+  vol_window: 30
+  vol_pct_window_days: 365
+  vol_high_pct: 0.90
+  vol_high_mult: 0.5
+  funding_z_block: 2.0         # crowded: no new longs
+  funding_z_days: 90
+  # Not built yet (spec section 4): tightening trailing stops when crowded; a minimum
+  # number of days in a regime before changing size (avoids trading back and forth at a line).
+
 costs:
   taker: 0.0005
   maker: 0.0002

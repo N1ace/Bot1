@@ -60,8 +60,10 @@ class TelegramNotifier:
         for upd in data.get("result", []) if data.get("ok") else []:
             next_offset = max(next_offset, upd["update_id"] + 1)
             msg = upd.get("message") or {}
-            if str((msg.get("chat") or {}).get("id")) != self.chat_id:
-                log.warning("Ignored a Telegram message from an unknown chat")
+            # Both the chat AND the sender must be the owner (matters if the chat id is ever a group).
+            if (str((msg.get("chat") or {}).get("id")) != self.chat_id
+                    or str((msg.get("from") or {}).get("id")) != self.chat_id):
+                log.warning("Ignored a Telegram message from an unknown chat/sender")
                 continue
             if msg.get("text"):
                 texts.append(msg["text"].strip())

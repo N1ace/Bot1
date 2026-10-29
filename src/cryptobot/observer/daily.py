@@ -58,8 +58,13 @@ def handle_commands(advisor: AdvisorStore, texts: list[str], trades_db: str = ":
         day = re.fullmatch(r"/day\s+(\d{4}-\d{2}-\d{2})", cmd, flags=re.I)
         stats = re.fullmatch(r"/stats(?:\s+(today|yesterday|week|month|all))?", cmd, flags=re.I)
         if m:
-            s = advisor.decide(int(m.group(2)), approved=m.group(1).lower() == "approve")
-            replies.append(approval_reply(s) if s else f"No suggestion #{m.group(2)}.")
+            before = advisor.suggestion(int(m.group(2)))
+            if before is None:
+                replies.append(f"No suggestion #{m.group(2)}.")
+            elif before["status"] != "pending":
+                replies.append(f"#{before['id']} was already {before['status']} - nothing changed.")
+            else:
+                replies.append(approval_reply(advisor.decide(before["id"], approved=m.group(1).lower() == "approve")))
         elif cmd.lower() in ("/pending", "/status"):
             pending = advisor.pending()
             replies.append("No suggestions waiting." if not pending else

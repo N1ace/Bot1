@@ -98,13 +98,15 @@ class RoundTrip:
 
     @property
     def net(self) -> float:
+        """Realized - fees for this trade. Funding is shown separately in the statistics."""
         return self.realized - self.fees
 
 
 def round_trips(fills: pd.DataFrame) -> list[RoundTrip]:
     """Group fills into trades: from flat -> position -> flat again, per environment and symbol.
 
-    A trade that started before the period only shows the part inside the period.
+    Must be given ALL fills from the very first one (not just a period), otherwise a
+    trade that started earlier would be misread. Use trips_for_period() for periods.
     """
     trips: list[RoundTrip] = []
     if fills.empty:
@@ -138,22 +140,52 @@ def _finish(c: dict, closed) -> RoundTrip:
                      avg(entry_key), avg(exit_key), c["realized"], c["fees"])
 
 
-def statistics(fills: pd.DataFrame, funding: pd.DataFrame) -> dict[str, dict]:
-    """Per environment: trades, wins, losses, win rate, realized, fees, funding, net, best/worst, volume."""
+def trips_for_period(all_fills: pd.DataFrame, start: datetime, end: datetime) -> list[RoundTrip]:
+    """Trades touching the period: closed inside it, opened inside it, or still open at its end.
+
+    Built from the complete fill history, so a trade opened before the period is read correctly.
+    """
+    start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+    return [t for t in round_trips(all_fills)
+            if t.opened < end_ts and (t.closed is None or t.closed >= start_ts)]
+
+
+def _usdt_fees(f: pd.DataFrame) -> tuple[float, dict[str, float]]:
+    """(fees paid in USDT, fees in other assets e.g. BNB) - never add different assets together."""
+    if f.empty:
+        return 0.0, {}
+    asset = f["fee_asset"].fillna("USDT").replace("", "USDT")
+    usdt = float(f.loc[asset == "USDT", "fee"].sum())
+    other = f.loc[asset != "USDT"].groupby(asset[asset != "USDT"])["fee"].sum().to_dict()
+    return usdt, {k: float(v) for k, v in other.items()}
+
+
+def statistics(fills: pd.DataFrame, funding: pd.DataFrame, trips: list[RoundTrip] | None = None,
+               start: datetime | None = None) -> dict[str, dict]:
+    """Per environment: trades, wins, losses, win rate, realized, fees, funding, net, best/worst, volume.
+
+    fills/funding: only the period's rows (money that moved inside the period).
+    trips: trades from trips_for_period(); if None they are built from `fills` (whole history).
+    """
+    trips = round_trips(fills) if trips is None else trips
+    start_ts = pd.Timestamp(start) if start else None
     out: dict[str, dict] = {}
     envs = set(fills["environment"]) if not fills.empty else set()
     envs |= set(funding["environment"]) if not funding.empty else set()
+    envs |= {t.environment for t in trips}
     for env in sorted(envs):
         f = fills[fills["environment"] == env] if not fills.empty else fills
         fund = float(funding.loc[funding["environment"] == env, "amount"].sum()) if not funding.empty else 0.0
-        closed = [t for t in round_trips(f) if t.closed is not None]
+        env_trips = [t for t in trips if t.environment == env]
+        closed = [t for t in env_trips if t.closed is not None and (start_ts is None or t.closed >= start_ts)]
         wins = [t.net for t in closed if t.net > 0]
         losses = [t.net for t in closed if t.net <= 0]
         realized = float(f["realized_pnl"].sum()) if not f.empty else 0.0
-        fees = float(f["fee"].sum()) if not f.empty else 0.0
+        fees, other_fees = _usdt_fees(f)
         out[env] = {
+            "other_fees": other_fees,
             "trades_closed": len(closed),
-            "trades_open": sum(1 for t in round_trips(f) if t.closed is None),
+            "trades_open": sum(1 for t in env_trips if t.closed is None),
             "fills": len(f),
             "wins": len(wins),
             "losses": len(losses),
@@ -177,9 +209,8 @@ def _usd(x: float) -> str:
     return "n/a" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:+,.2f} USDT"
 
 
-def format_trades(label: str, fills: pd.DataFrame) -> str:
-    trips = round_trips(fills)
-    lines = [f"Trades - {label} (UTC)"]
+def format_trades(label: str, trips: list[RoundTrip]) -> str:
+    lines = [f"Trades - {label} (UTC)  [net = realized - fees; funding is in the statistics]"]
     if not trips:
         lines.append("No trades in this period.")
         return "\n".join(lines)
@@ -208,14 +239,21 @@ def format_stats(label: str, stats: dict[str, dict]) -> str:
             f"avg win {_usd(s['avg_win'])}, avg loss {_usd(s['avg_loss'])}",
             f"  traded volume {s['volume']:,.0f} USDT",
         ]
+        if s["other_fees"]:
+            lines.append("  fees in other assets (not in NET): " +
+                         ", ".join(f"{v:g} {k}" for k, v in s["other_fees"].items()))
     return "\n".join(lines)
 
 
+EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+
 def report(db: str | Path, start: datetime, end: datetime, label: str, what: str = "both") -> str:
-    fills, funding = load_fills(db, start, end), load_funding(db, start, end)
+    window_fills, funding = load_fills(db, start, end), load_funding(db, start, end)
+    trips = trips_for_period(load_fills(db, EPOCH, end), start, end)   # full history -> correct grouping
     parts = []
     if what in ("trades", "both"):
-        parts.append(format_trades(label, fills))
+        parts.append(format_trades(label, trips))
     if what in ("stats", "both"):
-        parts.append(format_stats(label, statistics(fills, funding)))
+        parts.append(format_stats(label, statistics(window_fills, funding, trips, start)))
     return "\n\n".join(parts)

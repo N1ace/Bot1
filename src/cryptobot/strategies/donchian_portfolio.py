@@ -39,6 +39,7 @@ import yaml
 
 from cryptobot import indicators
 from cryptobot.backtest.engine import PortfolioState, Target
+from cryptobot.risk.overlay import OverlayConfig, overlay, regime_frame, validate_overlay
 from cryptobot.risk.portfolio import (CircuitBreakers, RiskConfig, SymbolInput, apply_portfolio_caps, size_position,
                                       validate_hard_limits)
 from cryptobot.strategies.donchian import DEFAULT_LOOKBACKS, ensemble_signal
@@ -54,8 +55,26 @@ class StrategyConfig:
     vol_window: int = 60
 
 
+def load_overlay_config(raw: dict) -> OverlayConfig:
+    """Regime overlay + funding layer settings from the strategy.yaml dict."""
+    g, f = raw.get("regime", {}), raw.get("funding", {})
+    cfg = OverlayConfig(
+        enabled=bool(g.get("enabled", True)), btc_sma=int(g.get("btc_sma", 200)),
+        sma_slope_days=int(g.get("sma_slope_days", 20)), er_n=int(g.get("er_n", 20)),
+        er_trend=float(g.get("er_trend", 0.30)), er_chop=float(g.get("er_chop", 0.15)),
+        adx_n=int(g.get("adx_n", 14)), adx_trend=float(g.get("adx_trend", 25)), adx_chop=float(g.get("adx_chop", 18)),
+        chop_mult=float(g.get("chop_mult", 0.5)), vol_window=int(g.get("vol_window", 30)),
+        vol_pct_window_days=int(g.get("vol_pct_window_days", 365)), vol_high_pct=float(g.get("vol_high_pct", 0.90)),
+        vol_high_mult=float(g.get("vol_high_mult", 0.5)), funding_z_block=float(g.get("funding_z_block", 2.0)),
+        funding_z_days=int(g.get("funding_z_days", 90)),
+        funding_halve_ann=float(f.get("halve_above_ann", 0.30)), funding_exit_ann=float(f.get("exit_above_ann", 0.60)),
+    )
+    validate_overlay(cfg)
+    return cfg
+
+
 def load_strategy_config(path: str | Path = "config/strategy.yaml") -> tuple[StrategyConfig, RiskConfig, dict]:
-    """Returns (strategy settings, risk settings, raw dict for costs/symbols)."""
+    """Returns (strategy settings, risk settings, raw dict for costs/symbols/regime/funding)."""
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     s, r = raw["strategy"], raw["risk"]
@@ -94,10 +113,30 @@ def precompute(bars: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
 
 class DonchianPortfolio:
     def __init__(self, bars: dict[str, pd.DataFrame], strat: StrategyConfig, risk: RiskConfig,
-                 breaker_state: dict | None = None):
-        """breaker_state: saved CircuitBreakers.to_state() (live: loaded from SQLite)."""
+                 breaker_state: dict | None = None, funding: dict[str, pd.DataFrame] | None = None,
+                 overlay_cfg: OverlayConfig | None = None, btc_bars: pd.DataFrame | None = None):
+        """
+        breaker_state: saved CircuitBreakers.to_state() (live: loaded from SQLite)
+        funding:       funding history per symbol (for the funding layer)
+        overlay_cfg:   regime overlay + funding layer settings; None = overlay off
+        btc_bars:      BTC daily bars for the market state (defaults to bars['BTCUSDT'])
+        """
         self.strat, self.risk = strat, risk
         self.data = {s: precompute(df, strat) for s, df in bars.items()}
+        self.overlay_cfg = overlay_cfg or OverlayConfig(enabled=False)
+        validate_overlay(self.overlay_cfg)
+        btc = btc_bars if btc_bars is not None else bars.get("BTCUSDT")
+        self.regime: dict[str, pd.DataFrame] = {}
+        self.overlay_warnings: list[str] = []
+        if self.overlay_cfg.enabled:
+            if btc is None or btc.empty:
+                raise ValueError("Regime overlay is on but there are no BTCUSDT bars for the market state")
+            for s, df in bars.items():
+                self.regime[s] = regime_frame(df, btc, (funding or {}).get(s), self.overlay_cfg)
+                missing = int(self.regime[s]["funding_missing"].sum())
+                if missing:
+                    self.overlay_warnings.append(f"{s}: no funding data on {missing} of {len(df)} days "
+                                                 "(funding layer inactive on those days)")
         rets = pd.DataFrame({s: d["log_ret"] for s, d in self.data.items()})
         self.corr = {(a, b): rets[a].rolling(strat.vol_window).corr(rets[b])
                      for i, a in enumerate(rets) for b in list(rets)[i + 1:]}
@@ -135,6 +174,8 @@ class DonchianPortfolio:
         r = self.risk.risk_per_trade * self.breakers.r_multiplier()
         blocked = self.breakers.entries_blocked(date)
         wanted, rows = {}, {}
+        no_add: set[str] = set()                         # crowded: may hold or reduce, not add
+        reasons: dict[str, tuple[str, ...]] = {}
         for s in histories:
             row = self.data[s].loc[date]
             signal = row["signal"]
@@ -145,6 +186,14 @@ class DonchianPortfolio:
             price, atr = histories[s]["close"].iloc[-1], row["atr"]
             pos = state.positions[s]
             qty, _ = size_position(equity, s, SymbolInput(price, atr, row["vol_ann"], signal), self.risk, r)
+            # Regime overlay + funding layer: shrink (never grow) the size.
+            decision = (overlay(self.regime[s].loc[date], math.copysign(1, qty), signal, self.overlay_cfg)
+                        if qty != 0 and s in self.regime else None)
+            if decision is not None:
+                qty *= decision.multiplier
+                if decision.block_increase:
+                    no_add.add(s)
+                reasons[s] = decision.reasons
             # Risk is measured against the stop that will really be on the exchange.
             stop, dist = None, math.nan
             if qty != 0:
@@ -163,8 +212,8 @@ class DonchianPortfolio:
             cur = pos.qty
             cap_cut = abs(target) < abs(wanted[s][0]) * (1 - 1e-9)    # a portfolio cap shrank it
             same_side = cur == 0 or target == 0 or math.copysign(1, cur) == math.copysign(1, target)
-            if blocked and (abs(target) > abs(cur) or not same_side):
-                target = cur if same_side else 0.0       # loss limit active: may only reduce
+            if (blocked or s in no_add) and (abs(target) > abs(cur) or not same_side):
+                target = cur if same_side else 0.0       # loss limit / crowding: may only reduce
             small_change = (cur != 0 and target != 0 and same_side
                             and abs(target - cur) <= self.strat.rebalance_threshold * abs(cur))
             if small_change and not (cap_cut and abs(target) < abs(cur)):
@@ -184,5 +233,6 @@ class DonchianPortfolio:
                 continue
             out[s] = Target(qty=target, stop=stop)
             self.log.append({"date": date, "symbol": s, "signal": self.data[s].loc[date, "signal"],
-                             "target": target, "current": cur, "stop": stop, "r": r, "blocked": blocked})
+                             "target": target, "current": cur, "stop": stop, "r": r, "blocked": blocked,
+                             "overlay": reasons.get(s, ())})
         return out

@@ -73,6 +73,27 @@ def test_empty_period_and_missing_db(tmp_path):
     assert not db.exists()          # reading never creates a database
 
 
+def test_trade_opened_before_period_is_not_misread(db):
+    """Reviewer finding: /today must not show a fake SHORT for a long opened yesterday."""
+    text = tr.report(db, *tr.day_range(date(2026, 10, 21)))       # only the closing SELL is on this day
+    assert "LONG" in text and "SHORT" not in text
+    stats = tr.statistics(tr.load_fills(db, *tr.day_range(date(2026, 10, 21))[:2]), tr.load_funding(
+        db, *tr.day_range(date(2026, 10, 21))[:2]), tr.trips_for_period(
+        tr.load_fills(db, tr.EPOCH, tr.day_range(date(2026, 10, 21))[1]), *tr.day_range(date(2026, 10, 21))[:2]),
+        tr.day_range(date(2026, 10, 21))[0])
+    assert stats["demo"]["trades_closed"] == 1 and stats["demo"]["wins"] == 1
+
+
+def test_fees_in_other_assets_are_not_added_to_usdt(tmp_path):
+    path = tmp_path / "bnb.sqlite"
+    s = TradeStore(path, "demo", "futures", "FUTURES")
+    s.record_fill(Fill(order_id="1", symbol="BTCUSDT", side=Side.BUY, quantity=0.001, price=80_000, fee=0.0001,
+                       fee_asset="BNB", timestamp=datetime(2026, 10, 28, tzinfo=timezone.utc)))
+    s.close()
+    text = tr.report(path, *tr.day_range(date(2026, 10, 28)), what="stats")
+    assert "fees -0.00 USDT" in text and "0.0001 BNB" in text
+
+
 def test_telegram_history_commands(db):
     a = AdvisorStore(":memory:")
     replies = handle_commands(a, ["/day 2026-10-28", "/stats all", "/day 2026-13-01", "/hello"], str(db))

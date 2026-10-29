@@ -18,7 +18,7 @@ from pathlib import Path
 
 from cryptobot.backtest.data import MarketDataStore
 from cryptobot.backtest.engine import Backtester, BacktestConfig, buy_and_hold
-from cryptobot.strategies.donchian_portfolio import DonchianPortfolio, load_strategy_config
+from cryptobot.strategies.donchian_portfolio import DonchianPortfolio, load_overlay_config, load_strategy_config
 
 UNCAPPED = dict(max_heat=1.0, cluster_heat=1.0, max_net_notional=1.5)   # only the vol target + 1.5x leverage cap
 
@@ -34,19 +34,25 @@ def main() -> int:
     costs = raw["costs"]
     bt = BacktestConfig(initial_equity=20_000, taker_fee=costs["taker"], slippage_bps=dict(costs["slippage_bps"]))
 
+    on = load_overlay_config(raw)
+    off = dataclasses.replace(on, enabled=False)
+    vol_only = dataclasses.replace(risk, risk_per_trade=1.0, **UNCAPPED)
+    shorts = dataclasses.replace(strat, allow_shorts=True)
     variants = [
-        ("spec default r=0.5%", strat, risk),
-        ("live ramp r=0.25%", strat, dataclasses.replace(risk, risk_per_trade=0.0025)),
-        ("r=1%", strat, dataclasses.replace(risk, risk_per_trade=0.01)),
-        ("r=2% (heat/cluster caps bind)", strat, dataclasses.replace(risk, risk_per_trade=0.02)),
-        ("vol target only (like the paper)", strat, dataclasses.replace(risk, risk_per_trade=1.0, **UNCAPPED)),
-        ("spec default + shorts", dataclasses.replace(strat, allow_shorts=True), risk),
+        ("spec default, overlay OFF", strat, risk, off),
+        ("spec default, overlay ON", strat, risk, on),
+        ("live ramp r=0.25%, overlay ON", strat, dataclasses.replace(risk, risk_per_trade=0.0025), on),
+        ("r=1%, overlay ON", strat, dataclasses.replace(risk, risk_per_trade=0.01), on),
+        ("vol target only, overlay OFF", strat, vol_only, off),
+        ("vol target only, overlay ON", strat, vol_only, on),
+        ("vol target + shorts, overlay ON", shorts, vol_only, on),
     ]
     rows = []
     print(f"{'variant':<36} {'final':>9} {'CAGR':>7} {'Sharpe':>7} {'maxDD':>7} {'vol':>7} "
           f"{'fees':>6} {'funding':>8} {'trips':>6}")
-    for name, s_cfg, r_cfg in variants:
-        res = Backtester(bt, bars, funding, marks).run(DonchianPortfolio(bars, s_cfg, r_cfg))
+    for name, s_cfg, r_cfg, o_cfg in variants:
+        strategy = DonchianPortfolio(bars, s_cfg, r_cfg, funding=funding, overlay_cfg=o_cfg)
+        res = Backtester(bt, bars, funding, marks).run(strategy)
         rows.append(_report(name, res))
     res = Backtester(bt, bars, funding, marks).run(buy_and_hold(fraction=0.5))
     rows.append(_report("buy & hold 0.5x (reference)", res))
