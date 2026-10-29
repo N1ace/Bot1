@@ -76,6 +76,25 @@ What it does now (**it places no orders**):
 
 Logs go to the console and `logs/cryptobot.log`; data to `data/cryptobot.sqlite`.
 
+## Level 0 - the daily observer (current level)
+
+The bot grows in levels (see `bot-roadmap-and-principles.md`). `level:` in `config/config.yaml`
+is set **only by you**; the bot refuses anything above it. Level 0 = data + reports, no orders.
+
+```powershell
+python -m cryptobot daily              # update data, market state, Telegram report (+ weekly review on Sundays' close)
+python -m cryptobot daily --no-send    # same without Telegram
+powershell -ExecutionPolicy Bypass -File scripts\install_daily_task.ps1           # schedule it daily at 03:30
+powershell -ExecutionPolicy Bypass -File scripts\install_daily_task.ps1 -Remove   # remove the schedule
+```
+
+- Daily report: market state, positions, risk usage, what the bot did, one tip (in `reports/daily/`).
+- Weekly review: `reports/weekly-<year>-W<week>.md` + Telegram, with up to 3 suggestions.
+- Answer suggestions in Telegram with `/approve N` or `/reject N` (read at the next daily run).
+  Approving only **records** your answer - the bot then tells you which config line to change.
+- Level 0 exit gate: 14 clean daily runs in a row (no crash, no data gap).
+- Telegram setup: create a bot with @BotFather, put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`.
+
 ## Backtesting (strategy-risk-spec.md steps 1-2)
 
 ```powershell

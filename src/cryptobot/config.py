@@ -15,6 +15,8 @@ from typing import Mapping
 
 import yaml
 
+from cryptobot.levels import check_level_config
+
 MODES = ("spot", "margin", "futures", "copytrade_lead")
 ENVIRONMENTS = ("paper", "testnet", "demo", "live")
 MARKET_DATA_SOURCES = ("live", "exchange")
@@ -91,6 +93,7 @@ class Config:
     timeframe: str
     candle_limit: int
     risk: RiskConfig
+    level: int = 0
     futures: FuturesConfig = field(default_factory=FuturesConfig)
     market_data: str = "live"
     paper_balances: dict[str, float] = field(default_factory=dict)
@@ -134,6 +137,7 @@ def _build(raw: dict) -> Config:
             timeframe=str(raw.get("timeframe", "1h")),
             candle_limit=int(raw.get("candle_limit", 100)),
             risk=risk,
+            level=raw.get("level", 0),
             futures=futures,
             market_data=str(raw.get("market_data", "live")),
             paper_balances={k: float(v) for k, v in raw.get("paper", {}).get("starting_balances", {}).items()},
@@ -162,6 +166,9 @@ def _build(raw: dict) -> Config:
         raise ConfigError(f"futures.leverage must be 1..{MAX_LEVERAGE_HARD_CAP} (hard cap), got {futures.leverage}")
     if futures.margin_type != "ISOLATED":
         raise ConfigError("futures.margin_type must be ISOLATED (cross margin is not allowed in this bot)")
+    level_problem = check_level_config(cfg.level, cfg.environment)
+    if level_problem:
+        raise ConfigError(level_problem)
     return cfg
 
 

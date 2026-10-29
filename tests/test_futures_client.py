@@ -121,7 +121,21 @@ def order_client(api):
     client = client_with(api)
     client.rules = {"BTCUSDT": BTC_RULES}
     client.query_delay_s = 0  # no real waiting in tests
+    client.level = 2          # demo orders allowed
     return client
+
+
+def test_orders_refused_below_level_2_but_closing_allowed():
+    from cryptobot.levels import LevelError
+    api = OrderApi()
+    client = order_client(api)
+    client.level = 0
+    with pytest.raises(LevelError, match="level"):
+        client.place_market_order("BTCUSDT", "BUY", Decimal("0.0007"), "cbtest-l0")
+    with pytest.raises(LevelError):
+        client.place_stop_market_close("BTCUSDT", "SELL", Decimal("70000"), "cbtest-l0s")
+    client.place_market_order("BTCUSDT", "SELL", Decimal("0.0007"), "cbtest-l0c", reduce_only=True)
+    assert api.new_order_calls == 1          # only the closing order went out
 
 
 def test_market_order_returns_queried_order():

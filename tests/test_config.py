@@ -1,5 +1,7 @@
 """The live-trading guard, futures limits and credential loading."""
 
+import dataclasses
+
 import pytest
 
 from cryptobot.config import (LIVE_CONFIRM_ENV, LIVE_CONFIRM_VALUE, ConfigError, _build, check_live_guard,
@@ -29,20 +31,30 @@ def test_repo_config_is_safe_by_default():
     assert c.live_trading is False
 
 
+def live_cfg(live_trading: bool):
+    """A live config built directly (loading one is refused anyway: level 3 isn't built yet)."""
+    return dataclasses.replace(cfg(), environment="live", live_trading=live_trading, level=3)
+
+
+def test_live_config_cannot_load_while_live_levels_are_not_built():
+    with pytest.raises(ConfigError):
+        cfg(environment="live", live_trading=True, level=3)
+
+
 def test_live_requires_config_flag():
     with pytest.raises(ConfigError):
-        check_live_guard(cfg(environment="live"), {LIVE_CONFIRM_ENV: LIVE_CONFIRM_VALUE})
+        check_live_guard(live_cfg(False), {LIVE_CONFIRM_ENV: LIVE_CONFIRM_VALUE})
 
 
 def test_live_requires_env_confirmation():
     with pytest.raises(ConfigError):
-        check_live_guard(cfg(environment="live", live_trading=True), {})
+        check_live_guard(live_cfg(True), {})
     with pytest.raises(ConfigError):
-        check_live_guard(cfg(environment="live", live_trading=True), {LIVE_CONFIRM_ENV: "yes"})
+        check_live_guard(live_cfg(True), {LIVE_CONFIRM_ENV: "yes"})
 
 
 def test_live_allowed_only_with_both():
-    check_live_guard(cfg(environment="live", live_trading=True), {LIVE_CONFIRM_ENV: LIVE_CONFIRM_VALUE})
+    check_live_guard(live_cfg(True), {LIVE_CONFIRM_ENV: LIVE_CONFIRM_VALUE})
 
 
 def test_live_flag_with_testnet_is_rejected():
@@ -77,6 +89,34 @@ def test_mode_environment_combinations():
         _build({**FUT, "environment": "testnet"})   # futures testnet was replaced by demo
     with pytest.raises(ConfigError):
         _build({**BASE, "environment": "demo"})      # spot has no demo env in this bot
+
+
+# ---- levels ------------------------------------------------------------------
+
+def test_level_defaults_to_observer():
+    assert _build(FUT).level == 0
+
+
+@pytest.mark.parametrize("level", [3, 4, 5, 6, 7, -1, "2"])
+def test_unavailable_or_invalid_levels_refused(level):
+    with pytest.raises(ConfigError):
+        _build({**FUT, "level": level})
+
+
+def test_live_environment_needs_live_level():
+    with pytest.raises(ConfigError, match="level 3"):
+        _build({**FUT, "environment": "live", "level": 2})
+
+
+def test_require_level():
+    from cryptobot.levels import LevelError, require_level
+    require_level(0, "collect_data")
+    require_level(0, "report")
+    with pytest.raises(LevelError):
+        require_level(0, "paper_trade")
+    with pytest.raises(LevelError):
+        require_level(1, "demo_order")
+    require_level(2, "demo_order")
 
 
 # ---- credentials -------------------------------------------------------------

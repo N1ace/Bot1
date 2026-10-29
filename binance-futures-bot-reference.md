@@ -22,6 +22,7 @@ Keep it in the repo root next to `CLAUDE.md` and point Claude Code at it.
 | Orders placed so far | Demo only: 1 test round trip (0.0007 BTC), net −0.04 USDT |
 | Live account size (planned) | ~20,000 USD |
 | Spec steps 1–2 (data + backtester) | ✅ 2026-10-28: BTC/ETH 2020-01→2026-10 stored; engine sanity-checked |
+| Bot level | **0 – Observer** since 2026-10-29: daily job (03:30 Israel time), Telegram reports + tips, suggestions with /approve. Gate: 14 clean days |
 | Spec steps 3–4 (strategy + risk layers 1–4) | ✅ 2026-10-29 built + risk-reviewed. Backtest 2020–26 (20K, spec defaults): +2.6% total, max DD −2.8%, Sharpe 0.34 — fails gate "Sharpe > 0.8". Open decision: trailing vs. fixed catastrophe stop, risk level |
 
 **Next:** risk manager (0.5% risk sizing, liquidation buffer), the risk-reviewer, then Prompt B

@@ -41,6 +41,27 @@ def rsi(candles: pd.DataFrame, length: int = 14) -> pd.Series:
     return _warm_up(ta.rsi(candles["close"], length=length), length)
 
 
+def sma(candles: pd.DataFrame, length: int) -> pd.Series:
+    """Simple moving average of the close (e.g. the 200-day average)."""
+    return candles["close"].rolling(length).mean()
+
+
+def adx(candles: pd.DataFrame, length: int = 14) -> pd.Series:
+    """Average Directional Index, 0-100: how strong a trend is (not its direction).
+    Roughly: above 25 = trending, below 18 = choppy."""
+    out = ta.adx(candles["high"], candles["low"], candles["close"], length=length)
+    return _warm_up(out[f"ADX_{length}"], 2 * length)
+
+
+def efficiency_ratio(candles: pd.DataFrame, length: int = 20) -> pd.Series:
+    """Kaufman efficiency ratio, 0-1: net move / total distance travelled.
+    1 = price went straight in one direction, near 0 = it zig-zagged (chop)."""
+    close = candles["close"]
+    net = (close - close.shift(length)).abs()
+    path = close.diff().abs().rolling(length).sum()
+    return net / path
+
+
 def atr(candles: pd.DataFrame, length: int = 14) -> pd.Series:
     """Average True Range: typical candle size in price units. Useful for placing
     stop-losses relative to volatility (e.g. stop = entry - 2 * ATR)."""

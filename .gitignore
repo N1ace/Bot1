@@ -18,6 +18,7 @@ __pycache__/
 # --- cryptobot runtime files (anchored with / so src/cryptobot/data/ is NOT ignored) ---
 /logs/
 /data/
+/reports/
 *.sqlite
 *.sqlite-journal
 

@@ -261,7 +261,11 @@ async def main() -> int:
         return 2
     setup_logging(cfg.log_level, cfg.log_dir, secrets=creds.secret_values)
 
-    client = FuturesClient("demo", creds)
+    client = FuturesClient("demo", creds, level=cfg.level)   # orders need level 2 (demo)
+    if cfg.level < 2:
+        print(f"Refusing: this script places demo orders and needs level 2; config level is {cfg.level}. "
+              f"Only you can change the level in config/config.yaml.", file=sys.stderr)
+        return 2
     store = TradeStore(cfg.sqlite_path, "demo", "futures", cfg.account)
     risk = RiskManager(cfg.risk, halted_on=store.last_halt_date(), on_halt=store.record_halt)
 

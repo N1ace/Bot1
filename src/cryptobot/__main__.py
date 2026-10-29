@@ -1,4 +1,9 @@
-"""Entry point:  python -m cryptobot [--config config/config.yaml] [--minutes 10]"""
+"""Entry point.
+
+    python -m cryptobot daily            # the once-a-day job (level 0: data + market state + report)
+    python -m cryptobot daily --no-send  # same, but don't send to Telegram
+    python -m cryptobot                  # futures demo: startup routine + streams for --minutes
+"""
 
 from __future__ import annotations
 
@@ -14,8 +19,10 @@ from cryptobot.logging_setup import setup_logging
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="cryptobot")
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "daily"])
     parser.add_argument("--config", default="config/config.yaml", help="path to the YAML config")
     parser.add_argument("--minutes", type=float, default=10, help="futures: how long to run the streams")
+    parser.add_argument("--no-send", action="store_true", help="daily: don't send to Telegram")
     args = parser.parse_args()
 
     # Windows consoles default to an old code page; Binance can return non-ASCII names.
@@ -34,6 +41,9 @@ def main() -> int:
     log.info("Starting cryptobot: mode=%s environment=%s account=%s", cfg.mode, cfg.environment, cfg.account)
 
     try:
+        if args.command == "daily":
+            from cryptobot.observer.daily import run_daily
+            return run_daily(cfg, send=not args.no_send)
         if cfg.mode == "futures":
             from cryptobot.modes import futures
             return futures.run(cfg, args.minutes)

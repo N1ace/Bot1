@@ -38,6 +38,7 @@ from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
 
 from cryptobot.config import MAX_LEVERAGE_HARD_CAP, Credentials
 from cryptobot.exchange.filters import SymbolRules, to_decimal
+from cryptobot.levels import require_level
 
 log = logging.getLogger(__name__)
 
@@ -110,10 +111,12 @@ class FuturesClient:
     query_attempts = 5
     query_delay_s = 2.0
 
-    def __init__(self, environment: str, credentials: Credentials, timeout_ms: int = 10_000):
+    def __init__(self, environment: str, credentials: Credentials, timeout_ms: int = 10_000, level: int = 0):
+        """level: the bot level from config. Orders that add risk need level 2 (demo) / 3 (live)."""
         if environment not in REST_URLS:
             raise ValueError(f"FuturesClient supports {tuple(REST_URLS)}, got {environment!r}")
         self.environment = environment
+        self.level = level
         self.ws_url = WS_URLS[environment]
         config = ConfigurationRestAPI(
             api_key=credentials.api_key,
@@ -244,6 +247,10 @@ class FuturesClient:
         NOT resend - we look the order up by client_order_id. Only a clear rejection
         (HTTP 400, e.g. bad quantity) is raised as an error.
         """
+        if not reduce_only:
+            # Opening/adding risk needs the right level. Closing (reduce-only) is always
+            # allowed: getting OUT of a position must never be blocked.
+            self._require_order_level()
         rules = self.rules.get(symbol)
         if rules is None:
             raise ValueError(f"No exchange rules loaded for {symbol} - run startup() first")
@@ -286,6 +293,9 @@ class FuturesClient:
         raise RuntimeError(f"Order {client_order_id} was not placed (not found on Binance after "
                            f"{self.query_attempts} checks)")
 
+    def _require_order_level(self) -> None:
+        require_level(self.level, "live_order" if self.environment == "live" else "demo_order")
+
     def query_order(self, symbol: str, client_order_id: str) -> dict | None:
         try:
             return _dump(self._api.query_order(symbol=symbol, orig_client_order_id=client_order_id).data())
@@ -301,6 +311,7 @@ class FuturesClient:
         workingType=MARK_PRICE: triggered by the mark price, which is harder to spike
         than the last traded price, so fewer false stop-outs.
         """
+        self._require_order_level()
         resp = self._api.new_algo_order(
             algo_type=NewAlgoOrderAlgoTypeEnum.CONDITIONAL,
             symbol=symbol,

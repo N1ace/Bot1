@@ -17,6 +17,13 @@ mode: futures
 environment: demo
 live_trading: false
 
+# Bot level (bot-roadmap-and-principles.md Part 3). ONLY YOU change this.
+#   0 = observer: collect data, compute market state, send reports. No orders.
+#   1 = paper trades   2 = demo orders   3+ = live (not built yet)
+# The bot refuses any action above this level. It may SUGGEST a level-up in the
+# weekly review once the current level's exit gate is passed - it never changes it.
+level: 0
+
 # Where prices come from.
 #   exchange - the same environment as orders (demo prices on demo).
 #              Recommended for futures: demo prices track the real market and
@@ -60,4 +67,4 @@ storage:
   sqlite_path: data/cryptobot.sqlite
 
 telegram:
-  enabled: false               # stub only for now; token/chat id go in .env
+  enabled: true                # daily report + weekly review; token/chat id are in .env
