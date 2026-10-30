@@ -50,6 +50,12 @@ class OverlayConfig:
     funding_exit_ann: float = 0.60
     funding_z_block: float = 2.0
     funding_z_days: int = 90
+    # Crowded-trade filter, off unless set: open interest grew unusually fast this week AND
+    # funding shows the crowd is on our side -> half size (forced exits hit crowded sides).
+    oi_crowd_z: float | None = None
+    oi_crowd_mult: float = 0.5
+    oi_change_days: int = 7
+    oi_z_days: int = 90
 
 
 def market_state(btc: pd.DataFrame, cfg: OverlayConfig) -> pd.Series:
@@ -90,8 +96,15 @@ def funding_daily(funding: pd.DataFrame, index: pd.DatetimeIndex, z_days: int = 
     return out.fillna({"funding_ann": 0.0, "funding_z": 0.0})
 
 
+def oi_zscore(open_interest: pd.Series, index: pd.DatetimeIndex, cfg: OverlayConfig) -> pd.Series:
+    """How unusual this week's open-interest growth is, against the previous 90 days. 0 when unknown."""
+    change = open_interest.reindex(index).ffill(limit=3).pct_change(cfg.oi_change_days, fill_method=None)
+    hist = change.shift(1).rolling(cfg.oi_z_days, min_periods=30)
+    return ((change - hist.mean()) / hist.std()).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
 def regime_frame(bars: pd.DataFrame, btc: pd.DataFrame, funding: pd.DataFrame | None,
-                 cfg: OverlayConfig) -> pd.DataFrame:
+                 cfg: OverlayConfig, open_interest: pd.Series | None = None) -> pd.DataFrame:
     """Everything the overlay needs, per day, computed only from the past."""
     out = pd.DataFrame(index=bars.index)
     out["market"] = market_state(btc, cfg).reindex(bars.index).fillna(0.0)
@@ -100,6 +113,7 @@ def regime_frame(bars: pd.DataFrame, btc: pd.DataFrame, funding: pd.DataFrame | 
     vol = np.log(bars["close"]).diff().rolling(cfg.vol_window).std() * math.sqrt(365)
     out["vol_pct"] = vol.rolling(cfg.vol_pct_window_days, min_periods=120).rank(pct=True)
     out = out.join(funding_daily(funding, bars.index, cfg.funding_z_days))
+    out["oi_z"] = oi_zscore(open_interest, bars.index, cfg) if open_interest is not None else 0.0
     return out
 
 
@@ -137,6 +151,9 @@ def overlay(row: pd.Series, side: float, signal: float, cfg: OverlayConfig) -> O
     elif against > cfg.funding_halve_ann:
         mult *= 0.5
         reasons.append(f"funding {against:.0%}/yr against position x0.5")
+    if cfg.oi_crowd_z is not None and row["oi_z"] > cfg.oi_crowd_z and row["funding_ann"] * side > 0:
+        mult *= cfg.oi_crowd_mult
+        reasons.append(f"crowded (open interest z {row['oi_z']:.1f}) x{cfg.oi_crowd_mult}")
     block = side > 0 and row["funding_z"] > cfg.funding_z_block
     if block:
         reasons.append(f"crowded (funding z {row['funding_z']:.1f}): no new longs")

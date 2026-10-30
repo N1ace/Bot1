@@ -125,26 +125,40 @@ python scripts/run_backtest.py            # buy & hold sanity check, with and wi
   range (gap fills at the bar extreme, as the spec requires), live lot sizes (0.001 BTC/ETH)
   and minimum order values, and account liquidation at maintenance margin.
 
-## Core + satellite (the trading plan, chosen 2026-10-30)
+## The trading plan: two sleeves (chosen 2026-10-30)
 
 Two sleeves on separate capital (live: separate Binance sub-accounts, because one-way mode
-can't hold a core long and a satellite short on the same coin in one account):
+can't hold a long and a short on the same coin in one account):
 
 | Sleeve | Config | What it does | Capital |
 |---|---|---|---|
-| Core | `config/core.yaml` | daily Donchian trend ensemble, 6 coins, longs + half-size shorts | 60% |
-| Satellite | `config/satellite.yaml` | 4h: pullbacks in trends, mean reversion in chop (BTC/ETH/SOL) | 40% |
+| Core | `config/core_big.yaml` | daily Donchian trend ensemble, 6 coins, longs + half-size shorts | 60% |
+| Strongest vs weakest | `config/xs.yaml` | every Sunday: long the 4 strongest, short the 4 weakest of the 30 most-traded coins | 40% |
 
-Both use `risk_profile: aggressive` (the owner's "ready to lose half" budget): bigger
-positions, kill switch at -35% drawdown, leverage still capped at 3x. Hard limits per
-profile live in `src/cryptobot/risk/portfolio.py` (`HARD_LIMITS_BY_PROFILE`).
-`config/strategy.yaml` keeps the cautious spec version for comparison.
+Both use `risk_profile: aggressive` (the owner's budget): kill switch at -35% drawdown, leverage
+still capped at 3x. Hard limits per profile: `HARD_LIMITS_BY_PROFILE` in `src/cryptobot/risk/portfolio.py`.
+
+Tested and rejected, kept for the record: the 4h satellite (`config/satellite.yaml`, mean reversion hit
+the kill switch) and the open-interest crowding filter (off by default, no improvement).
+`config/strategy.yaml` is the cautious spec version; `config/core.yaml` the first aggressive core.
 
 ```powershell
-python scripts/download_history.py SOLUSDT BNBUSDT XRPUSDT DOGEUSDT        # daily candles for the core
-python scripts/download_history.py BTCUSDT ETHUSDT SOLUSDT --intraday 4h   # 4h candles for the satellite
-python scripts/validate_sleeves.py                                         # gates per sleeve + combined
+python scripts/download_history.py SOLUSDT BNBUSDT XRPUSDT DOGEUSDT --extended   # core data
+python scripts/download_universe.py        # every USDT perpetual, delisted ones included
+python scripts/download_metrics.py         # archived open interest + long/short ratios (2020-09 on)
+python scripts/validate_core_big.py        # gates for the core
+python scripts/validate_xs.py              # gates for the sleeve and the 60/40 mix
 ```
+
+Reports go to `reports/`. Every run is added to `data/variants_log.csv` and counted in the Deflated
+Sharpe, so fix the rules first and run a test once.
+
+### Level 1: paper trading
+
+With `level: 1` the daily job replays both sleeves from `start_date` in `config/paper.yaml` through
+the validation backtester, on real prices, with no orders. Would-be fills go into the trade log as
+`paper-core` / `paper-xs`, so `trades`, `stats` and the Telegram commands show them separately.
+A recorded fill that changes on a later replay raises a warning in the daily report.
 
 ## Going live (later - order placement is not built yet)
 

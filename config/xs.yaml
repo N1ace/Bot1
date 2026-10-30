@@ -1,0 +1,53 @@
+# STRONGEST vs WEAKEST coins (cross-sectional momentum), candidate to replace the satellite.
+# Every Sunday close: rank the most-traded coins by their last 4 weeks, buy the top 4, short the bottom 4.
+# Earns when strong coins keep beating weak ones, even if the whole market goes nowhere.
+#
+# All settings fixed BEFORE any backtest (2026-10-30). Tested once, on coins dead AND alive.
+
+risk_profile: aggressive
+capital_share: 0.40
+
+strategy:
+  timeframe: 1d
+  universe_size: 30            # most-traded coins, by median USDT volume of the last 30 days
+  volume_days: 30
+  min_universe: 15             # fewer coins than this: stay flat, ranking means nothing
+  min_age_days: 90             # skip fresh listings: they jump around and can't be shorted safely
+  lookback_days: 28            # score = 28-day return / its volatility
+  n_long: 4
+  n_short: 4
+  rebalance_weekday: 6         # 6 = Sunday close -> fills at Monday's open
+  rebalance_threshold: 0.20
+  vol_days: 60
+  vol_floor: 0.30              # never treat a coin as calmer than 30%/yr
+  position_vol: 0.05           # each coin swings ~5%/yr of the sleeve; 8 of them ~ 15%/yr in total
+  atr_n: 20
+  k_atr: 3.0                   # safety stop, fixed at entry; stopped coins sit out until next Sunday
+  max_stop: 0.24               # stop must trigger well before liquidation at 2x
+  funding_block_ann: 0.30      # don't open a side that pays more than 30%/yr funding
+
+risk:
+  risk_per_trade: 0.015        # reference the circuit breakers scale down
+  sizing: vol_target
+  max_position_risk: 0.03
+  vol_target_asset: 0.05
+  slip_buffer: {BTCUSDT: 0.25, ETHUSDT: 0.25, default: 0.5}
+  isolated_leverage: 2
+  stop_to_liq_max: 0.5
+  max_eff_leverage: 1.8
+  max_positions: 8
+  max_heat: 0.10
+  cluster: []                  # longs and shorts hedge each other, so no same-direction cluster
+  cluster_heat: 0.06
+  corr_floor: 0.7
+  max_net_notional: 1.0
+  daily_loss: 0.05
+  weekly_loss: 0.10
+  dd_steps: {0.15: 0.75, 0.25: 0.5}
+  dd_stop: 0.35                # KILL SWITCH
+  losing_streak: {count: 8, mult: 0.5, trades: 10}
+
+costs:
+  taker: 0.0005
+  maker: 0.0002
+  slippage_bps: {BTCUSDT: 3, ETHUSDT: 3, default: 10}   # mid-size coins cost more to trade

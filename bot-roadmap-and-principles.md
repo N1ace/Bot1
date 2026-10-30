@@ -84,6 +84,7 @@ on its own.
 
 ### Level 1 — Paper signals
 - Core daily Donchian ensemble produces signals and *would-be* trades with full risk sizing.
+- Since 2026-10-30 two sleeves run on paper: `config/core_big.yaml` and `config/xs.yaml` (`src/cryptobot/paper/runner.py`), at the owner's aggressive risk budget.
 - Logged to SQLite as paper trades with fees + funding.
 - **Exit gate:** backtest passes `strategy-risk-spec.md` section 7; paper results behave like the backtest.
 

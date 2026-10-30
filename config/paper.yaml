@@ -1,0 +1,6 @@
+# Level 1 paper trading (no orders, real prices). Runs only when config.yaml says level: 1 or higher.
+# Dollar amounts are make-believe; results are the same percentages at any size.
+start_date: "2026-11-01"       # fixed in advance: never move it to make results look better
+capital: 50000                 # split by each sleeve's capital_share (60% core, 40% strongest-vs-weakest)
+core_config: config/core_big.yaml
+xs_config: config/xs.yaml

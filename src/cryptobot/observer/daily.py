@@ -119,6 +119,8 @@ def run_daily(cfg: Config, now: pd.Timestamp | None = None, send: bool = True) -
 
         _maybe_suggest_level_up(advisor, cfg.level, streak)
         report = daily_report(day, cfg.level, regimes, market, health.problems, streak, tip, advisor.pending())
+        if cfg.level >= 1:
+            report += "\n\n" + _paper_text(cfg)
         _save(REPORTS_DIR / "daily" / f"{day:%Y-%m-%d}.txt", report)
         notifier.send(report)
         print(report)
@@ -135,6 +137,16 @@ def run_daily(cfg: Config, now: pd.Timestamp | None = None, send: bool = True) -
         return 1
     finally:
         advisor.close()
+
+
+def _paper_text(cfg: Config) -> str:
+    """Level 1+: update the paper sleeves. A failure here must not lose the daily report."""
+    from cryptobot.paper.runner import run_paper
+    try:
+        return run_paper(cfg.level, cfg.sqlite_path, MARKET_DB).text()
+    except Exception as e:  # noqa: BLE001 - reported to the owner in the same message
+        log.exception("Paper trading failed")
+        return f"Paper trading FAILED today: {type(e).__name__}: {e}"
 
 
 def _maybe_suggest_level_up(advisor: AdvisorStore, level: int, streak: int) -> None:

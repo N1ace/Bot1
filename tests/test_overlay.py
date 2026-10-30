@@ -100,3 +100,29 @@ def test_regime_frame_has_no_look_ahead():
     cut = idx[500]
     part = regime_frame(bars.loc[:cut], bars.loc[:cut], fund.loc[:cut + pd.Timedelta(hours=23)], CFG)
     pd.testing.assert_frame_equal(full.loc[:cut], part)
+
+
+def test_crowded_open_interest_halves_only_the_crowded_side():
+    import dataclasses
+    import pandas as pd
+    from cryptobot.risk.overlay import OverlayConfig, overlay
+    cfg = OverlayConfig(oi_crowd_z=2.0)
+    calm = dict(market=1.0, er=0.5, adx=30.0, vol_pct=0.5, funding_z=0.0)
+    crowded_longs = pd.Series({**calm, "funding_ann": 0.10, "oi_z": 3.0})
+    assert overlay(crowded_longs, 1.0, 1.0, cfg).multiplier == 0.5
+    assert overlay(crowded_longs, -1.0, -1.0, dataclasses.replace(cfg)).multiplier == 0.5       # risk-on shorts only
+    normal = pd.Series({**calm, "funding_ann": 0.10, "oi_z": 1.0})
+    assert overlay(normal, 1.0, 1.0, cfg).multiplier == 1.0
+    assert overlay(crowded_longs, 1.0, 1.0, OverlayConfig()).multiplier == 1.0                  # off by default
+
+
+def test_open_interest_zscore_ignores_the_future():
+    import numpy as np
+    import pandas as pd
+    from cryptobot.risk.overlay import OverlayConfig, oi_zscore
+    idx = pd.date_range("2022-01-01", periods=200, tz="UTC")
+    oi = pd.Series(np.exp(np.random.default_rng(0).normal(0, 0.02, 200).cumsum()), index=idx)
+    later = oi.copy()
+    later.iloc[150:] *= 5
+    a, b = oi_zscore(oi, idx, OverlayConfig()), oi_zscore(later, idx, OverlayConfig())
+    pd.testing.assert_series_equal(a.iloc[:150], b.iloc[:150])

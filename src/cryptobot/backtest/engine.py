@@ -72,6 +72,9 @@ class BacktestConfig:
     # and trading stops - like the account being liquidated on Binance.
     maint_margin_rate: float = 0.004
     bar: pd.Timedelta = pd.Timedelta(days=1)  # bar length of the data handed in
+    # A coin whose data ends was delisted: a position still open is closed at its last
+    # close, this much worse (delistings are announced, but the price usually sinks first).
+    delist_penalty: float = 0.02
 
     def slip(self, symbol: str) -> float:
         return self.slippage_bps.get(symbol, self.slippage_bps.get("default", 0)) / 10_000
@@ -209,6 +212,13 @@ class Backtester:
             stopped_today: set[str] = set()
             for symbol, df in self.bars.items():
                 if date not in df.index:
+                    pos = positions[symbol]
+                    if pos.qty != 0 and date > df.index[-1]:
+                        last = df["close"].iloc[-1]
+                        worse = 1 - cfg.delist_penalty if pos.qty > 0 else 1 + cfg.delist_penalty
+                        fill(symbol, date, -pos.qty, last * worse, "delisted", last)
+                        pos.stop = None
+                        pending.pop(symbol, None)
                     continue
                 bar = df.loc[date]
                 mark = self.mark.get(symbol)

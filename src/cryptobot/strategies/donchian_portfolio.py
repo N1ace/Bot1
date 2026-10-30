@@ -118,12 +118,14 @@ def precompute(bars: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
 class DonchianPortfolio:
     def __init__(self, bars: dict[str, pd.DataFrame], strat: StrategyConfig, risk: RiskConfig,
                  breaker_state: dict | None = None, funding: dict[str, pd.DataFrame] | None = None,
-                 overlay_cfg: OverlayConfig | None = None, btc_bars: pd.DataFrame | None = None):
+                 overlay_cfg: OverlayConfig | None = None, btc_bars: pd.DataFrame | None = None,
+                 open_interest: dict[str, pd.Series] | None = None):
         """
         breaker_state: saved CircuitBreakers.to_state() (live: loaded from SQLite)
         funding:       funding history per symbol (for the funding layer)
         overlay_cfg:   regime overlay + funding layer settings; None = overlay off
         btc_bars:      BTC daily bars for the market state (defaults to bars['BTCUSDT'])
+        open_interest: daily USDT open interest per symbol (crowded-trade filter)
         """
         self.strat, self.risk = strat, risk
         self.data = {s: precompute(df, strat) for s, df in bars.items()}
@@ -136,7 +138,8 @@ class DonchianPortfolio:
             if btc is None or btc.empty:
                 raise ValueError("Regime overlay is on but there are no BTCUSDT bars for the market state")
             for s, df in bars.items():
-                self.regime[s] = regime_frame(df, btc, (funding or {}).get(s), self.overlay_cfg)
+                self.regime[s] = regime_frame(df, btc, (funding or {}).get(s), self.overlay_cfg,
+                                              (open_interest or {}).get(s))
                 missing = int(self.regime[s]["funding_missing"].sum())
                 if missing:
                     self.overlay_warnings.append(f"{s}: no funding data on {missing} of {len(df)} days "

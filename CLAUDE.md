@@ -8,6 +8,9 @@ ensemble, 6 risk layers, validation gates). Live trading only after its section 
 Levels 0–6, allowed tactics and the advisor (bot suggests, owner decides):
 [bot-roadmap-and-principles.md](bot-roadmap-and-principles.md). Never skip a level; the bot
 never raises risk, leverage, parameters or its level by itself.
+Since 2026-10-30 the goal is an active trading bot, not an investment bot: two sleeves (`config/core_big.yaml`,
+`config/xs.yaml`) under `risk_profile: aggressive`. See the plan section in [README.md](README.md). Fix rules before a test,
+run it once: every variant counts in the Deflated Sharpe (`data/variants_log.csv`).
 
 This repo holds two things side by side:
 
