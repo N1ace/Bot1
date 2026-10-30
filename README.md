@@ -160,6 +160,23 @@ the validation backtester, on real prices, with no orders. Would-be fills go int
 `paper-core` / `paper-xs`, so `trades`, `stats` and the Telegram commands show them separately.
 A recorded fill that changes on a later replay raises a warning in the daily report.
 
+## News & event monitor
+
+A separate service that watches the market, the macro calendar and the news, and tells you on
+Telegram. It can only make a bot more cautious. It has no order code and no exchange keys.
+Spec: [news-event-layer-spec.md](news-event-layer-spec.md). Settings: `config/monitor.yaml`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_monitor_task.ps1   # run at login, starts now
+python -m monitor status    # what would a bot be allowed to do right now?
+python -m monitor once      # run each job one time (sends Telegram)
+python -m monitor kill "reason"         # owner: set the kill switch
+python -m monitor clear-kill "reason"   # owner: end it
+```
+
+Add `ANTHROPIC_API_KEY=` to `.env` for AI summaries. Without it, briefings are raw headlines.
+A bot uses `monitor.flags.read_view()` before every entry and `monitor.sizing.gap_capped_qty()` when sizing.
+
 ## Going live (later - order placement is not built yet)
 
 All of these are required; any one missing and the bot refuses to start:

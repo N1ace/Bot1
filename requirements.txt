@@ -16,3 +16,8 @@ pytest==9.1.1           # tests
 numba==0.68.0           # speeds up some indicators; 0.68 has Python 3.14 builds
 llvmlite==0.50.0        # compiler used by numba
 tqdm==4.70.1            # progress bars used by pandas-ta
+
+# News & event monitor (src/monitor/)
+APScheduler==3.11.3      # timed jobs
+feedparser==6.0.14       # reads RSS news feeds
+anthropic==2.3.0         # Claude API, for AI briefings

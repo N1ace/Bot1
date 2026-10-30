@@ -57,3 +57,17 @@ Notes to check at Level 2:
 - [ ] D20. Import the leverage cap constant instead of the literal 3 (`risk/portfolio.py`)
 
 Before going live: all section 7 gates must pass, and check whether the real account can use sub-accounts.
+
+## News monitor: still to do
+
+- [ ] N1. Run the risk-reviewer agent on `src/monitor/` (spec section 10)
+- [ ] N2. The order bot must call `read_view()` before every entry and use `gap_capped_qty()` (bot doesn't exist yet)
+- [ ] N3. Kill switch: the order bot must close positions when it's set (the monitor only sets the flag)
+- [ ] N4. Liquidation stress action: tighten the stop to 1x ATR for positions on the losing side (bot's job)
+- [ ] N5. Binance announcement stream: needs an HMAC key with a secret on the real account, which we don't have (`wss://api.binance.com/sapi/wss`)
+- [ ] N6. CPI adaptive size rule (R-squared of BTC vs CPI surprise): needs consensus forecasts, no free official source found
+- [ ] N7. Backtest each layer (spec section 8) and stress replays. Keep a layer only if it earns it
+- [ ] N8. Withdrawal halts: no data source yet, so the owner sets `python -m monitor kill`
+- [ ] N9. VPS, so it watches while the PC is off
+- [ ] N10. First real AI briefing, once `ANTHROPIC_API_KEY` is in `.env` (request shape checked offline only)
+- [ ] N11. Polish pass on alert texts after a few weeks of real use

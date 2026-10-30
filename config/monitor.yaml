@@ -1,0 +1,61 @@
+# News & event-risk monitor (news-event-layer-spec.md). It can only make a trading bot MORE cautious.
+# All thresholds are starting points, not backtest results. Times are UTC.
+database: data/monitor.sqlite
+
+schedules:
+  briefing_hours: [0, 3, 6, 9, 12, 15, 18, 21]
+  briefing_minute: 5
+  calendar_check: "22:00"
+  heartbeat_minutes: 5
+
+calendar:
+  events: [CPI, NFP, FOMC]
+  blackout_before_hours: 24
+  blackout_after_hours: 2
+  stale_after_days: 45         # warn if the saved dates are this old and nothing newer could be fetched
+
+stress:
+  btc_1h_abs_return: 0.05
+  btc_1h_sigma: 4
+  liq_percentile: 0.99
+  liq_min_hours: 168           # a week of own logs before the percentile means anything
+  dvol_jump_points_24h: 8
+  dvol_high_percentile: 0.90
+  dvol_vol_mult: 0.6
+  dvol_mult_hours: 72
+  funding_z_block: 3
+  block_adds_hours: 24
+  stable_depeg: 0.99
+  stable_kill: 0.97
+  stable_min_venues: 2
+  freeze_hours: 24
+  binance_fail_limit: 3        # failed hourly health checks in a row -> alert + entries frozen
+
+gap_risk:
+  stop_fill_multiple: 2.5
+  max_gap_loss_per_position: 0.015
+
+alerts:
+  cooldown_hours: 6            # the same alert is sent at most this often
+  big_move_cooldown_minutes: 60
+
+news:
+  # Checked 2026-10-30: each returned current items.
+  rss_feeds:
+    coindesk: https://www.coindesk.com/arc/outboundfeeds/rss/
+    cointelegraph: https://cointelegraph.com/rss
+    decrypt: https://decrypt.co/feed
+    theblock: https://www.theblock.co/rss.xml
+    federal_reserve: https://www.federalreserve.gov/feeds/press_monetary.xml
+  max_items: 40
+  lookback_hours: 3
+  model: claude-sonnet-5-5
+  max_output_tokens: 4000      # above the spec's 1200: thinking shares this limit and a cut-off answer is useless
+  effort: low
+
+odds:
+  enabled: true
+  max_events: 3
+
+failsafe:
+  monitor_down_block_hours: 2

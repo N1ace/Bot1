@@ -12,6 +12,12 @@ Since 2026-10-30 the goal is an active trading bot, not an investment bot: two s
 `config/xs.yaml`) under `risk_profile: aggressive`. See the plan section in [README.md](README.md). Fix rules before a test,
 run it once: every variant counts in the Deflated Sharpe (`data/variants_log.csv`).
 
+**Freeze, since 2026-10-30:** the original bot and strategy are saved as tag `research-bot-v1`. Don't change
+them until the owner says so. New work is the order bot for the owner's own tactic and the news monitor.
+
+News & event monitor: [news-event-layer-spec.md](news-event-layer-spec.md), code in `src/monitor/`. Tighten-only:
+it has no order code and no exchange keys, and news or AI output can never set a risk flag.
+
 This repo holds two things side by side:
 
 - `src/cryptobot/` — **our own bot** (the main project). Spot mode is parked.
