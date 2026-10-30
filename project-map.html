@@ -1,0 +1,158 @@
+<title>Crypto Bot Project Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout concept: a transit map. Each part of the project is a line, each piece a station. */
+:root {
+  --bg: #f3f6f7; --ink: #14242b; --muted: #566a73; --panel: #ffffff; --rule: #d4dee2;
+  --frozen: #8a98a0; --monitor: #00856f; --order: #d4560f; --shared: #2f5fd0; --station: #ffffff;
+  --display: "Archivo", "Segoe UI", sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10191e; --ink: #e8f0f2; --muted: #9db0b8; --panel: #18242a; --rule: #2d3e46;
+  --frozen: #7c8b93; --monitor: #2cc3a6; --order: #ff8a4a; --shared: #7ea2ff; --station: #10191e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #10191e; --ink: #e8f0f2; --muted: #9db0b8; --panel: #18242a; --rule: #2d3e46;
+  --frozen: #7c8b93; --monitor: #2cc3a6; --order: #ff8a4a; --shared: #7ea2ff; --station: #10191e; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--display); line-height: 1.5; }
+.wrap { max-width: 1160px; margin: 0 auto; padding-block: 28px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); font-weight: 800; letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); margin: 6px 0 20px; font-family: var(--mono); font-size: .8rem; }
+.map { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; }
+svg { display: block; width: 100%; min-width: 980px; height: auto; }
+svg text { fill: var(--ink); font-family: var(--display); font-size: 13px; font-weight: 500; }
+svg .name { font-size: 15px; font-weight: 800; }
+svg .note { fill: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+.ln { fill: none; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
+.st { fill: var(--station); stroke-width: 4; }
+.lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px; margin-top: 26px; }
+.lines > section { min-width: 0; }
+h2 { font-size: 1.02rem; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }
+h2 i { width: 22px; height: 7px; border-radius: 4px; display: inline-block; }
+.state { font-family: var(--mono); font-size: .72rem; color: var(--muted); margin: 0 0 6px; }
+ul { margin: 0; padding-left: 18px; font-size: .9rem; }
+.foot { color: var(--muted); font-family: var(--mono); font-size: .75rem; margin-top: 26px; }
+</style>
+
+<div class="wrap">
+  <h1>Crypto Bot Project Map</h1>
+  <p class="sub">Updated 2026-10-31. Filled stations work today. Hollow dashed lines are not built yet.</p>
+
+  <div class="map">
+    <svg viewBox="0 0 1120 640" role="img" aria-label="Transit map of the project with four lines: frozen research bot, news monitor, order bot, and shared foundations">
+      <!-- shared foundations: vertical trunk -->
+      <path class="ln" style="stroke:var(--shared)" d="M930 112 V560"/>
+      <!-- frozen -->
+      <path class="ln" style="stroke:var(--frozen)" d="M70 150 H930"/>
+      <!-- monitor -->
+      <path class="ln" style="stroke:var(--monitor)" d="M70 330 H930"/>
+      <path class="ln" style="stroke:var(--monitor)" d="M760 330 V505"/>
+      <!-- order bot -->
+      <path class="ln" style="stroke:var(--order)" stroke-dasharray="3 15" d="M70 505 H1050"/>
+
+      <text class="name" x="52" y="48" style="fill:var(--ink)">Four lines, one project</text>
+      <text class="note" x="52" y="66">Lines meet where they share code or data</text>
+
+      <text class="name" x="52" y="112" style="fill:var(--frozen)">Original bot: frozen</text>
+      <text class="note" x="52" y="130">tag research-bot-v1. Daily job still runs</text>
+      <text class="name" x="52" y="292" style="fill:var(--monitor)">News monitor: running</text>
+      <text class="note" x="52" y="310">src/monitor, own database, no orders</text>
+      <text class="name" x="52" y="467" style="fill:var(--order)">Order bot: waiting for your tactic</text>
+      <text class="note" x="52" y="485">Binance demo first, reuses shared code</text>
+      <text class="name" x="952" y="112" style="fill:var(--shared)">Shared</text>
+
+      <!-- frozen stations -->
+      <g style="stroke:var(--frozen)">
+        <circle class="st" cx="90" cy="150" r="10"/><circle class="st" cx="240" cy="150" r="10"/>
+        <circle class="st" cx="390" cy="150" r="10"/><circle class="st" cx="540" cy="150" r="10"/>
+        <circle class="st" cx="690" cy="150" r="10"/><circle class="st" cx="820" cy="150" r="10"/>
+      </g>
+      <text x="90" y="182" text-anchor="middle">Market data</text><text class="note" x="90" y="198" text-anchor="middle">899 coins</text>
+      <text x="240" y="182" text-anchor="middle">Backtester</text><text class="note" x="240" y="198" text-anchor="middle">costs, funding</text>
+      <text x="390" y="182" text-anchor="middle">Two strategies</text><text class="note" x="390" y="198" text-anchor="middle">trend + ranking</text>
+      <text x="540" y="182" text-anchor="middle">Validation</text><text class="note" x="540" y="198" text-anchor="middle">gates not passed</text>
+      <text x="690" y="182" text-anchor="middle">Paper trader</text><text class="note" x="690" y="198" text-anchor="middle">Level 1, locked</text>
+      <text x="820" y="182" text-anchor="middle">Daily report</text><text class="note" x="820" y="198" text-anchor="middle">Level 0</text>
+
+      <!-- monitor stations -->
+      <g style="stroke:var(--monitor)">
+        <circle class="st" cx="90" cy="330" r="10"/><circle class="st" cx="230" cy="330" r="10"/>
+        <circle class="st" cx="370" cy="330" r="10"/><circle class="st" cx="510" cy="330" r="10"/>
+        <circle class="st" cx="640" cy="330" r="10"/>
+      </g>
+      <text x="90" y="362" text-anchor="middle">Macro calendar</text><text class="note" x="90" y="378" text-anchor="middle">CPI, jobs, Fed</text>
+      <text x="230" y="362" text-anchor="middle">Hourly check</text><text class="note" x="230" y="378" text-anchor="middle">BTC, DVOL, funding</text>
+      <text x="370" y="362" text-anchor="middle">Big-move watch</text><text class="note" x="370" y="378" text-anchor="middle">live stream</text>
+      <text x="510" y="362" text-anchor="middle">News feeds</text><text class="note" x="510" y="378" text-anchor="middle">5 RSS sources</text>
+      <text x="640" y="362" text-anchor="middle">AI summary</text><text class="note" x="640" y="378" text-anchor="middle">needs Claude key</text>
+
+      <!-- risk flags interchange -->
+      <circle class="st" cx="760" cy="330" r="15" style="stroke:var(--monitor)"/>
+      <text x="778" y="362" font-weight="700">Risk flags</text><text class="note" x="778" y="378">tighten only</text>
+
+      <!-- order bot stations -->
+      <g style="stroke:var(--order)" stroke-dasharray="4 4">
+        <circle class="st" cx="90" cy="505" r="10"/><circle class="st" cx="240" cy="505" r="10"/>
+        <circle class="st" cx="390" cy="505" r="10"/><circle class="st" cx="540" cy="505" r="10"/>
+        <circle class="st" cx="760" cy="505" r="15"/><circle class="st" cx="1050" cy="505" r="10"/>
+      </g>
+      <text x="90" y="537" text-anchor="middle">Your tactic</text><text class="note" x="90" y="553" text-anchor="middle">rules needed</text>
+      <text x="240" y="537" text-anchor="middle">Backtest it</text>
+      <text x="390" y="537" text-anchor="middle">Order sending</text><text class="note" x="390" y="553" text-anchor="middle">entries + stops</text>
+      <text x="540" y="537" text-anchor="middle">Binance demo</text><text class="note" x="540" y="553" text-anchor="middle">fake money</text>
+      <text x="760" y="537" text-anchor="middle">Reads flags</text><text class="note" x="760" y="553" text-anchor="middle">before each entry</text>
+      <text x="1050" y="537" text-anchor="middle">Live</text><text class="note" x="1050" y="553" text-anchor="middle">only you enable</text>
+
+      <!-- shared interchanges -->
+      <g style="stroke:var(--shared)">
+        <circle class="st" cx="930" cy="150" r="13"/><circle class="st" cx="930" cy="330" r="13"/>
+        <circle class="st" cx="930" cy="505" r="13"/>
+      </g>
+      <text x="952" y="146">Trade log and stats</text><text class="note" x="952" y="162">SQLite, tax records</text>
+      <text x="952" y="326">Telegram</text><text class="note" x="952" y="342">@n1acetopBot</text>
+      <text x="952" y="470">Binance connection</text><text class="note" x="952" y="486">risk checks, stops</text>
+    </svg>
+  </div>
+
+  <div class="lines">
+    <section>
+      <h2><i style="background:var(--frozen)"></i>Original bot</h2>
+      <p class="state">Frozen until you say otherwise</p>
+      <ul>
+        <li>Trend and coin-ranking strategies</li>
+        <li>Validation still fails its skill-or-luck test</li>
+        <li>Daily report job keeps running</li>
+      </ul>
+    </section>
+    <section>
+      <h2><i style="background:var(--monitor)"></i>News monitor</h2>
+      <p class="state">Running while the PC is on</p>
+      <ul>
+        <li>Telegram alerts and 3-hourly headlines</li>
+        <li>AI summaries wait for a Claude API key</li>
+        <li>Can only make a bot more cautious</li>
+      </ul>
+    </section>
+    <section>
+      <h2><i style="background:var(--order)"></i>Order bot</h2>
+      <p class="state">Next: waiting for your rules</p>
+      <ul>
+        <li>Automates your own tactic</li>
+        <li>Demo first, with your OK before the first order</li>
+        <li>Will read the monitor's risk flags</li>
+      </ul>
+    </section>
+    <section>
+      <h2><i style="background:var(--shared)"></i>Shared foundations</h2>
+      <p class="state">Built and tested</p>
+      <ul>
+        <li>Binance demo connection and stop orders</li>
+        <li>Risk checks, trade log, Telegram</li>
+        <li>Open items live in fixes-todo.md</li>
+      </ul>
+    </section>
+  </div>
+  <p class="foot">Repo: github.com/N1ace/Bot1. Live trading is off.</p>
+</div>
