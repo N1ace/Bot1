@@ -72,9 +72,11 @@ class BacktestConfig:
     # and trading stops - like the account being liquidated on Binance.
     maint_margin_rate: float = 0.004
     bar: pd.Timedelta = pd.Timedelta(days=1)  # bar length of the data handed in
-    # A coin whose data ends was delisted: a position still open is closed at its last
-    # close, this much worse (delistings are announced, but the price usually sinks first).
+    # A coin with no candles for longer than the grace period was delisted: a position still
+    # open is closed at its last close, this much worse (delistings are announced, but the
+    # price usually sinks first). The grace period stops a short data gap counting as one.
     delist_penalty: float = 0.02
+    delist_grace: pd.Timedelta = pd.Timedelta(days=3)
 
     def slip(self, symbol: str) -> float:
         return self.slippage_bps.get(symbol, self.slippage_bps.get("default", 0)) / 10_000
@@ -162,6 +164,7 @@ class Backtester:
         fills, payments, equity_curve = [], [], {}
         totals = {"fees": 0.0, "slippage_cost": 0.0, "funding": 0.0, "realized_pnl": 0.0}
         liquidated = False
+        last_close: dict[str, float] = {}
 
         def fill(symbol, date, side_qty, price, reason, ref_price):
             """Apply a fill of `side_qty` (signed) at `price`; returns nothing, updates state."""
@@ -213,7 +216,7 @@ class Backtester:
             for symbol, df in self.bars.items():
                 if date not in df.index:
                     pos = positions[symbol]
-                    if pos.qty != 0 and date > df.index[-1]:
+                    if pos.qty != 0 and date > df.index[-1] + cfg.delist_grace:
                         last = df["close"].iloc[-1]
                         worse = 1 - cfg.delist_penalty if pos.qty > 0 else 1 + cfg.delist_penalty
                         fill(symbol, date, -pos.qty, last * worse, "delisted", last)
@@ -221,6 +224,7 @@ class Backtester:
                         pending.pop(symbol, None)
                     continue
                 bar = df.loc[date]
+                last_close[symbol] = bar["close"]
                 mark = self.mark.get(symbol)
                 mbar = mark.loc[date] if mark is not None and date in mark.index else bar
                 pos = positions[symbol]
@@ -297,8 +301,8 @@ class Backtester:
                 totals["liquidation_date"] = date
 
             # 5. mark to market at the close, then ask the strategy for tomorrow
-            unrealized = sum(p.qty * (self.bars[s].loc[date, "close"] - p.entry_price)
-                             for s, p in positions.items() if p.qty != 0 and date in self.bars[s].index)
+            # A coin with no candle today keeps its last known price, so a data gap can't move equity.
+            unrealized = sum(p.qty * (last_close[s] - p.entry_price) for s, p in positions.items() if p.qty != 0)
             equity = cash + unrealized
             equity_curve[date] = equity
             if liquidated:

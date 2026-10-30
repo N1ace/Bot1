@@ -86,7 +86,7 @@ on its own.
 - Core daily Donchian ensemble produces signals and *would-be* trades with full risk sizing.
 - Since 2026-10-30 two sleeves run on paper: `config/core_big.yaml` and `config/xs.yaml` (`src/cryptobot/paper/runner.py`), at the owner's aggressive risk budget.
 - Logged to SQLite as paper trades with fees + funding.
-- **Exit gate:** backtest passes `strategy-risk-spec.md` section 7; paper results behave like the backtest.
+- **Exit gate:** backtest passes `strategy-risk-spec.md` section 7; paper Sharpe and worst drop fall inside the range of same-length windows of the backtest. (Paper replays the backtest engine, so it tests new market data, not execution. Execution is tested at Level 2.)
 
 ### Level 2 — Demo execution
 - Same code places orders on Binance demo: entries, algo stops, reconciliation, circuit breakers.

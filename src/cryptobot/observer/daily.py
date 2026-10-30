@@ -120,7 +120,10 @@ def run_daily(cfg: Config, now: pd.Timestamp | None = None, send: bool = True) -
         _maybe_suggest_level_up(advisor, cfg.level, streak)
         report = daily_report(day, cfg.level, regimes, market, health.problems, streak, tip, advisor.pending())
         if cfg.level >= 1:
-            report += "\n\n" + _paper_text(cfg)
+            paper_text, paper_problems = _paper_section(cfg)
+            report += "\n\n" + paper_text
+            if paper_problems:                  # a paper problem must not count as a clean day
+                advisor.record_run(day, "data_problems", health.problems + paper_problems)
         _save(REPORTS_DIR / "daily" / f"{day:%Y-%m-%d}.txt", report)
         notifier.send(report)
         print(report)
@@ -139,23 +142,26 @@ def run_daily(cfg: Config, now: pd.Timestamp | None = None, send: bool = True) -
         advisor.close()
 
 
-def _paper_text(cfg: Config) -> str:
-    """Level 1+: update the paper sleeves. A failure here must not lose the daily report."""
+def _paper_section(cfg: Config) -> tuple[str, list[str]]:
+    """Level 1+: update the paper sleeves. A failure here must not lose the daily report.
+    Returns (report text, problems)."""
     from cryptobot.paper.runner import run_paper
     try:
-        return run_paper(cfg.level, cfg.sqlite_path, MARKET_DB).text()
+        result = run_paper(cfg.level, cfg.sqlite_path, MARKET_DB)
+        return result.text(), result.problems
     except Exception as e:  # noqa: BLE001 - reported to the owner in the same message
         log.exception("Paper trading failed")
-        return f"Paper trading FAILED today: {type(e).__name__}: {e}"
+        problem = f"Paper trading FAILED today: {type(e).__name__}: {e}"
+        return problem, [problem]
 
 
 def _maybe_suggest_level_up(advisor: AdvisorStore, level: int, streak: int) -> None:
     if level == 0 and streak >= LEVEL0_GATE_DAYS:
         advisor.add_suggestion(
             "level_up", "Level 0 exit gate passed - prepare Level 1 (paper trading)?",
-            f"{streak} clean daily runs in a row (gate: {LEVEL0_GATE_DAYS}). Note: Level 1 code is not built yet, "
-            "and the Level 1 exit gate needs the backtest to pass strategy-risk-spec.md section 7 (it does not yet).",
-            "config/config.yaml -> level: 1   (only after Level 1 is built and reviewed)")
+            f"{streak} clean daily runs in a row (gate: {LEVEL0_GATE_DAYS}). Level 1 is built. Its exit gate still needs the "
+            "backtest to pass strategy-risk-spec.md section 7, which it does not yet.",
+            "config/config.yaml -> level: 1")
 
 
 def _weekly_due(advisor: AdvisorStore, day: date) -> bool:

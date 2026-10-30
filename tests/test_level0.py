@@ -148,3 +148,17 @@ def test_second_approval_says_already_decided():
 
 def test_telegram_disabled_without_credentials():
     assert TelegramNotifier(enabled=True, token="", chat_id="").enabled is False
+
+
+def test_a_paper_failure_does_not_lose_the_report_and_is_a_problem(monkeypatch):
+    from cryptobot.observer import daily
+    import cryptobot.paper.runner as runner
+
+    def boom(*a, **k):
+        raise RuntimeError("no data")
+    monkeypatch.setattr(runner, "run_paper", boom)
+
+    class Cfg:
+        level, sqlite_path = 1, ":memory:"
+    text, problems = daily._paper_section(Cfg)
+    assert "FAILED" in text and problems == [text]

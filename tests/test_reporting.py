@@ -101,3 +101,14 @@ def test_telegram_history_commands(db):
     assert "Statistics - all time" in replies[1] and "NET" in replies[1]
     assert "Not a valid date" in replies[2]
     assert "/today" in replies[3]           # help text
+
+
+def test_a_missing_table_is_empty_but_a_real_read_error_is_raised(tmp_path):
+    import sqlite3
+    import pytest
+    from cryptobot.reporting.trades import _read
+    db = tmp_path / "x.sqlite"
+    sqlite3.connect(db).close()
+    assert _read(db, "SELECT * FROM fills", ()).empty
+    with pytest.raises(Exception):
+        _read(db, "SELECT nonsense FROM", ())

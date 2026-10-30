@@ -65,6 +65,19 @@ def test_delisted_coin_is_closed_at_a_penalty():
     assert len(last) == 1 and last["price"].iloc[0] == pytest.approx(bars["DEADUSDT"]["close"].iloc[-1] * 0.98)
 
 
+def test_short_data_gap_is_not_a_delisting_and_keeps_equity_steady():
+    full = coin(0, n=30)
+    gap = full.drop(full.index[10:12])                     # 2 days missing, then it trades again
+    bars = {"GAPUSDT": gap, "LIVEUSDT": coin(0, n=30, seed=1)}
+
+    def strategy(symbol, history, state):
+        return Target(1.0) if symbol == "GAPUSDT" and state.positions[symbol].qty == 0 else None
+    res = Backtester(BacktestConfig(slippage_bps={}, taker_fee=0.0), bars).run(strategy)
+    assert "delisted" not in set(res.fills["reason"])
+    d9, d10 = gap.index[9], full.index[10]
+    assert res.equity[d10] == pytest.approx(res.equity[d9])    # same last price: no false jump
+
+
 def test_only_rebalances_on_sunday_and_kill_switch_flattens():
     cfg, risk, _ = load_xs_config()
     bars = market()

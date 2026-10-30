@@ -55,8 +55,10 @@ def archive_symbols(http: requests.Session) -> list[str]:
     """Every USDT-M symbol that ever had monthly klines, dead or alive."""
     out, marker = [], ""
     while True:
-        text = http.get(ARCHIVE, params={"delimiter": "/", "prefix": "data/futures/um/monthly/klines/",
-                                         "marker": marker}, timeout=60).text
+        resp = http.get(ARCHIVE, params={"delimiter": "/", "prefix": "data/futures/um/monthly/klines/",
+                                         "marker": marker}, timeout=60)
+        resp.raise_for_status()        # a failed page must stop us: it would silently drop dead coins
+        text = resp.text
         out += [p.rstrip("/").split("/")[-1] for p in re.findall(r"<Prefix>([^<]+)</Prefix>", text)[1:]]
         if "<IsTruncated>true" not in text:
             return sorted(s for s in set(out) if s.endswith("USDT") and s not in STABLES)
@@ -179,16 +181,22 @@ class Universe:
                 log.info("funding %d/%d", n, len(todo))
 
     def top_up(self, pause: float = 0.15) -> int:
-        """Daily job: closed candles since the last stored one, for every coin still trading."""
+        """Daily job: closed candles since the last stored one, for every coin still trading and any
+        coin that stopped only recently. A coin briefly not 'TRADING' must get its candles back."""
         now, added = int(time.time() * 1000), 0
-        names = [r[0] for r in self.db.execute("SELECT symbol FROM usymbols WHERE status='TRADING' AND "
-                                               "underlying_type='COIN'")]
+        recent = now - 10 * DAY_MS
+        names = [r[0] for r in self.db.execute(
+            "SELECT symbol FROM usymbols WHERE underlying_type IN ('COIN', 'UNKNOWN') AND (status='TRADING' OR symbol "
+            "IN (SELECT symbol FROM ubars GROUP BY symbol HAVING MAX(open_time) >= ?))", (recent,))]
         for s in names:
             last = self.db.execute("SELECT MAX(open_time) FROM ubars WHERE symbol=?", (s,)).fetchone()[0]
             start = last + DAY_MS if last else 0
             if start + DAY_MS > now:
                 continue
-            data = self._get("/fapi/v1/klines", {"symbol": s, "interval": "1d", "startTime": start, "limit": 1500})
+            try:
+                data = self._get("/fapi/v1/klines", {"symbol": s, "interval": "1d", "startTime": start, "limit": 1500})
+            except RemovedSymbol:
+                continue
             rows = [(s, int(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5]), float(k[7]))
                     for k in data if int(k[6]) < now]
             self.db.executemany("INSERT OR REPLACE INTO ubars VALUES (?,?,?,?,?,?,?,?)", rows)

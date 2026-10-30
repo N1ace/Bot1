@@ -62,8 +62,10 @@ def _read(db: str | Path, sql: str, params) -> pd.DataFrame:
     con = sqlite3.connect(db)
     try:
         return pd.read_sql_query(sql, con, params=params)
-    except Exception:  # table not created yet
-        return pd.DataFrame()
+    except pd.errors.DatabaseError as e:
+        if "no such table" in str(e):       # nothing recorded yet is fine; any other error is not
+            return pd.DataFrame()
+        raise
     finally:
         con.close()
 

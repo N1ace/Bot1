@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from cryptobot.levels import LevelError
-from cryptobot.paper.runner import PaperResult, run_paper, save_equity, sync_fills
+from cryptobot.paper.runner import (PaperResult, PaperSettingsChanged, check_lock, run_paper, save_equity,
+                                    sync_fills, sync_funding)
 from cryptobot.storage.db import TradeStore
 
 
@@ -30,9 +31,15 @@ def test_refused_below_level_1():
 
 
 def test_paper_code_cannot_reach_the_exchange():
-    tree = ast.parse(Path("src/cryptobot/paper/runner.py").read_text(encoding="utf-8"))
-    imported = [n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
-    assert not [m for m in imported if m and ("exchange" in m or "execution" in m)]
+    root = Path(__file__).parent.parent / "src" / "cryptobot"
+    for folder in ("paper", "strategies", "backtest", "risk"):
+        for path in (root / folder).glob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names = [a.name for a in node.names] if isinstance(node, ast.Import) else []
+                if isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                bad = [n for n in names if any(w in n for w in ("exchange", "execution", "modes", "ccxt", "binance"))]
+                assert not bad, f"{path} imports {bad}"
 
 
 def test_fills_are_appended_once_and_kept_separate(db):
@@ -66,3 +73,53 @@ def test_report_text_shows_kill_switch_and_warnings():
     text = PaperResult(equity={"core": 31_000.0}, start_equity={"core": 30_000.0}, killed=["core"],
                        problems=["x"]).text()
     assert "+3.3%" in text and "KILL SWITCH" in text and "WARNING: x" in text
+
+
+def test_report_before_the_start_date_is_a_plain_message():
+    assert "starts 2026-11-01" in PaperResult(waiting_for="2026-11-01").text()
+
+
+def test_a_vanished_fill_is_reported_and_kept(db):
+    sync_fills(db, "core", fills())
+    added, problems = sync_fills(db, "core", fills().iloc[0:0])
+    assert added == 0 and len(problems) == 1 and "vanished" in problems[0]
+    assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM fills").fetchone()[0] == 1
+
+
+def test_a_changed_fee_is_reported(db):
+    sync_fills(db, "core", fills())
+    assert "changed on replay" in sync_fills(db, "core", fills().assign(fee=0.5))[1][0]
+
+
+def test_funding_is_recorded_once_under_the_paper_environment(db):
+    from datetime import datetime, timezone
+    from cryptobot.reporting.trades import load_funding
+    pay = pd.DataFrame([{"time": pd.Timestamp("2026-11-02 08:00", tz="UTC"), "symbol": "BTCUSDT", "amount": -1.5}])
+    assert sync_funding(db, "core", pay) == 1
+    assert sync_funding(db, "core", pay) == 0
+    start, end = datetime(2026, 11, 1, tzinfo=timezone.utc), datetime(2026, 11, 3, tzinfo=timezone.utc)
+    got = load_funding(db, start, end)
+    assert list(got["environment"]) == ["paper-core"] and got["amount"].sum() == -1.5
+
+
+def lock_settings(tmp_path, capital=50000):
+    core, xs = tmp_path / "core.yaml", tmp_path / "xs.yaml"
+    if not core.exists():
+        core.write_text("# note\nrisk: 1\n")
+        xs.write_text("risk: 2\n")
+    return {"start_date": "2026-11-01", "capital": capital, "core_config": str(core), "xs_config": str(xs)}
+
+
+def test_settings_are_locked_but_comments_may_change(db, tmp_path):
+    s = lock_settings(tmp_path)
+    check_lock(db, s)
+    check_lock(db, s)
+    Path(s["core_config"]).write_text("# a different note\nrisk: 1\n")
+    check_lock(db, s)
+    with pytest.raises(PaperSettingsChanged):
+        check_lock(db, {**s, "start_date": "2026-12-01"})
+    with pytest.raises(PaperSettingsChanged):
+        check_lock(db, lock_settings(tmp_path, capital=20000))
+    Path(s["xs_config"]).write_text("risk: 3\n")
+    with pytest.raises(PaperSettingsChanged):
+        check_lock(db, s)
