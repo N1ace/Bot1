@@ -170,56 +170,68 @@ def freeze_entries(db: str | Path, reason: str, hours: float, now: datetime) -> 
 
 
 def hourly_check(db: str | Path, cfg: dict, http: requests.Session | None = None,
-                 now: datetime | None = None) -> list[str]:
-    """Runs every trigger. Returns alerts for the owner. One failed source doesn't stop the others."""
+                 now: datetime | None = None) -> list[tuple[str, str]]:
+    """Runs every trigger. Returns (alert key, text) pairs; each key is one kind of alert.
+    Every step runs alone, so one failure can't skip the others. A failed step is an alert too."""
     http = http or requests.Session()
     now = now or utc_now()
-    alerts: list[str] = []
+    found: list[tuple[str, str]] = []
 
-    def source(name, fetch):
-        try:
-            return fetch(http)
-        except (requests.RequestException, KeyError, ValueError, TypeError) as e:
-            log.warning("%s unavailable: %s", name, e)
-            return None
+    def btc():
+        closes = fetch_btc_closes(http)
+        reason = eval_btc_move(closes, cfg)
+        if reason and freeze_entries(db, reason, cfg["freeze_hours"], now):
+            side = "up" if closes[-1] >= closes[-2] else "down"
+            found.append((f"btc_{side}", f"{reason}. No new entries for {cfg['freeze_hours']}h. Check stops are live."))
 
-    closes = source("BTC candles", fetch_btc_closes)
-    reason = eval_btc_move(closes, cfg) if closes else None
-    if reason and freeze_entries(db, reason, cfg["freeze_hours"], now):
-        alerts.append(f"{reason}. No new entries for {cfg['freeze_hours']}h. Check stops are live.")
+    def liquidations():
+        reason = eval_liquidations(_finished_liq_hours(db, now), cfg)
+        if reason and freeze_entries(db, reason, cfg["freeze_hours"], now):
+            found.append(("liquidations", f"{reason}. No new entries for {cfg['freeze_hours']}h."))
 
-    reason = eval_liquidations(_finished_liq_hours(db, now), cfg)
-    if reason and freeze_entries(db, reason, cfg["freeze_hours"], now):
-        alerts.append(f"{reason}. No new entries for {cfg['freeze_hours']}h.")
+    def dvol():
+        reason = eval_dvol(fetch_dvol(http), cfg)
+        if reason and set_flag(db, "vol_mult", cfg["dvol_vol_mult"], "stress", reason, hours=cfg["dvol_mult_hours"],
+                               now=now):
+            found.append(("dvol", f"{reason}. New positions x{cfg['dvol_vol_mult']} for {cfg['dvol_mult_hours']}h."))
 
-    dvol = source("DVOL", fetch_dvol)
-    reason = eval_dvol(dvol, cfg) if dvol else None
-    if reason and set_flag(db, "vol_mult", cfg["dvol_vol_mult"], "stress", reason, hours=cfg["dvol_mult_hours"], now=now):
-        alerts.append(f"{reason}. New positions x{cfg['dvol_vol_mult']} for {cfg['dvol_mult_hours']}h.")
+    def funding():
+        crowded = eval_funding(fetch_funding(http), fetch_open_interest(http), cfg)
+        if crowded and set_flag(db, "block_adds_direction", crowded[0], "stress", crowded[1],
+                                hours=cfg["block_adds_hours"], now=now):
+            found.append((f"funding_{crowded[0]}", f"{crowded[1]}. No adds on that side for {cfg['block_adds_hours']}h."))
 
-    rates, oi = source("funding", fetch_funding), source("open interest", fetch_open_interest)
-    crowded = eval_funding(rates, oi, cfg) if rates and oi else None
-    if crowded and set_flag(db, "block_adds_direction", crowded[0], "stress", crowded[1],
-                            hours=cfg["block_adds_hours"], now=now):
-        alerts.append(f"{crowded[1]}. No adds on that side for {cfg['block_adds_hours']}h.")
+    def stablecoins():
+        prices = fetch_stablecoins(http)
+        venues = sum("USDT" in p for p in prices.values())
+        if venues < cfg["stable_min_venues"]:
+            found.append(("stable_blind", f"Only {venues} venue(s) gave a USDT price, so the stablecoin check can't "
+                                          "confirm anything right now."))
+        stable = eval_stablecoins(prices, cfg)
+        if stable and stable[0] == "kill":
+            if set_flag(db, "kill_switch", True, "stress", stable[1], now=now):
+                found.append(("kill_switch", f"KILL SWITCH SET: {stable[1]}. A bot must close everything and wait for you."))
+        elif stable and freeze_entries(db, stable[1], cfg["freeze_hours"], now):
+            found.append(("stable_freeze", f"{stable[1]}. Entries frozen for {cfg['freeze_hours']}h."))
 
-    stable = eval_stablecoins(fetch_stablecoins(http), cfg)
-    if stable and stable[0] == "kill":
-        if set_flag(db, "kill_switch", True, "stress", stable[1], now=now):
-            alerts.append(f"KILL SWITCH SET: {stable[1]}. A bot must close everything and wait for you.")
-    elif stable and freeze_entries(db, stable[1], cfg["freeze_hours"], now):
-        alerts.append(f"{stable[1]}. Entries frozen for {cfg['freeze_hours']}h.")
-
-    if binance_ok(http):
-        set_kv(db, "binance_fails", "0")
-    else:
+    def binance():
+        if binance_ok(http):
+            set_kv(db, "binance_fails", "0")
+            return
         fails = int(get_kv(db, "binance_fails", "0")) + 1
         set_kv(db, "binance_fails", str(fails))
         if fails >= cfg["binance_fail_limit"]:
             reason = f"Binance API failed {fails} hourly checks in a row"
             if freeze_entries(db, reason, cfg["freeze_hours"], now):
-                alerts.append(f"{reason}. Entries frozen. Please check if trading or payouts are halted.")
-    return alerts
+                found.append(("binance_down", f"{reason}. Entries frozen. Please check if trading or payouts are halted."))
+
+    for step in (btc, liquidations, dvol, funding, stablecoins, binance):
+        try:
+            step()
+        except Exception as e:  # noqa: BLE001 - reported to the owner, and the other steps still run
+            log.warning("Check %s failed: %s: %s", step.__name__, type(e).__name__, e)
+            found.append((f"check_failed_{step.__name__}", f"The {step.__name__} check could not run: {type(e).__name__}"))
+    return found
 
 
 def log_liquidation_hour(db: str | Path, hour: datetime, notional: float) -> None:

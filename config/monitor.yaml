@@ -12,7 +12,7 @@ calendar:
   events: [CPI, NFP, FOMC]
   blackout_before_hours: 24
   blackout_after_hours: 2
-  stale_after_days: 45         # warn if the saved dates are this old and nothing newer could be fetched
+  min_days_ahead: 30           # warn if an event type has no saved date this far ahead
 
 stress:
   btc_1h_abs_return: 0.05

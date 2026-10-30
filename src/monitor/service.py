@@ -10,11 +10,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from datetime import datetime, timedelta
 
+from apscheduler.events import EVENT_JOB_ERROR
 from apscheduler.schedulers.blocking import BlockingScheduler
 from cryptobot.notifications.telegram import TelegramNotifier
 
@@ -37,21 +37,37 @@ class Monitor:
 
     # ---- output ---------------------------------------------------------------------------
 
-    def send(self, text: str) -> None:
-        self.notifier.send(text[:TELEGRAM_LIMIT])
+    def send(self, text: str) -> bool:
+        return bool(self.notifier.send(text[:TELEGRAM_LIMIT]))
 
-    def alert(self, key: str, text: str, now: datetime | None = None) -> bool:
-        """Log every alert; send the same kind at most once per cooldown."""
+    def alert(self, key: str, text: str, now: datetime | None = None, cooldown_hours: float | None = None) -> bool:
+        """Log every alert; send the same kind at most once per cooldown. Returns True if delivered.
+        The cooldown starts only after delivery, so a Telegram outage doesn't swallow an alert."""
         now = now or utc_now()
         with connect(self.db) as con:
             con.execute("INSERT INTO alerts (created_utc, key, text) VALUES (?,?,?)", (iso(now), key, text))
         last = get_kv(self.db, f"alert:{key}")
-        hours = self.s["alerts"]["cooldown_hours"]
+        hours = self.s["alerts"]["cooldown_hours"] if cooldown_hours is None else cooldown_hours
         if last and now - datetime.fromisoformat(last) < timedelta(hours=hours):
             return False
+        if not self.send(f"MONITOR ALERT\n{text}"):
+            log.warning("Alert not delivered: %s", key)
+            return False
         set_kv(self.db, f"alert:{key}", iso(now))
-        self.send(f"MONITOR ALERT\n{text}")
         return True
+
+    def _kill_reminder(self) -> None:
+        """Send the kill switch alert until Telegram takes it. It has no cooldown."""
+        with connect(self.db) as con:
+            row = con.execute("SELECT id, reason FROM risk_flags WHERE flag='kill_switch' AND expires_at IS NULL "
+                              "ORDER BY id DESC LIMIT 1").fetchone()
+        if row and get_kv(self.db, "kill_alert_id") != str(row[0]):
+            if self.send(f"KILL SWITCH SET: {row[1]}\nA bot must close everything and wait for you."):
+                set_kv(self.db, "kill_alert_id", str(row[0]))
+
+    def on_job_error(self, event) -> None:
+        log.error("Job %s failed: %s", event.job_id, event.exception)
+        self.alert(f"job_failed:{event.job_id}", f"A monitor job failed: {type(event.exception).__name__}")
 
     # ---- jobs -----------------------------------------------------------------------------
 
@@ -59,19 +75,24 @@ class Monitor:
         beat(self.db)
 
     def hourly(self) -> list[str]:
-        cfg = self.s["stress"]
-        found = market.hourly_check(self.db, cfg, self.http)
-        found += events.apply_blackouts(self.db, self.s["calendar"])
-        for text in found:
-            self.alert(text.split(":")[0].split(" moved")[0][:40], text)
+        found = market.hourly_check(self.db, self.s["stress"], self.http)
+        try:
+            found += [(f"event:{text[:40]}", text) for text in events.apply_blackouts(self.db, self.s["calendar"])]
+        except Exception as e:  # noqa: BLE001 - a failed blackout must be loud
+            log.exception("Blackout check failed")
+            found.append(("check_failed_blackouts", f"The event blackout check could not run: {type(e).__name__}"))
+        for key, text in found:
+            if key != "kill_switch":
+                self.alert(key, text)
+        self._kill_reminder()
         beat(self.db)
-        return found
+        return [text for _, text in found]
 
     def calendar(self) -> list[str]:
         problems = events.refresh(self.db, self.http)
-        latest = events.latest_saved(self.db)
-        if latest is None or latest < utc_now():
-            problems.append("No future macro dates saved: the blackout windows are not working")
+        if not problems:
+            set_kv(self.db, "calendar_refresh_utc", iso(utc_now()))
+        problems += events.running_out(self.db, self.s["calendar"])
         for text in problems:
             self.alert(f"calendar:{text[:20]}", text)
         soon = events.upcoming(self.db, utc_now(), 48)
@@ -86,6 +107,8 @@ class Monitor:
         news.store_new(self.db, fetched, now)
         for text in problems:
             log.warning(text)
+        if len(problems) == len(cfg["rss_feeds"]):
+            self.alert("feeds_down", "All news feeds failed, so there is no briefing this time.")
         items = news.fresh_unused(self.db, cfg["lookback_hours"], cfg["max_items"], now)
         if not items:
             return None
@@ -96,9 +119,9 @@ class Monitor:
             text = _format_ai(result, upcoming, lines)
             kind, data = "ai", result.model_dump_json()
             risky = [i for i in result.items if i.venue_risk_binance]
-            if risky:
-                self.alert("venue_risk", "News reports a possible Binance problem. It changes nothing automatically; "
-                           "please check it yourself:\n" + "\n".join(f"{i.title}\n{i.link}" for i in risky))
+            for i in risky:                     # one alert per story, so a small one can't hide a big one
+                self.alert(f"venue_risk:{i.title[:60]}", "News reports a possible Binance problem. It changes nothing "
+                           f"automatically; please check it yourself:\n{i.title}\n{i.link}")
         else:
             text = _format_raw(items, upcoming, lines)
             kind, data = "raw", None
@@ -141,9 +164,16 @@ class Monitor:
         reason = f"BTC moved {move:+.1%} within the hour"
         market.freeze_entries(self.db, reason, cfg["freeze_hours"], now)
         text = f"{reason}. No new entries for {cfg['freeze_hours']}h. Check stops are live."
-        recent = news.fresh_unused(self.db, 6, 20, now)
-        note = summariser.explain_move(self.db, self.s["news"], move, recent)
-        self.alert("big_move", f"{text}\n{note}" if note else text, now)
+        hours = self.s["alerts"]["big_move_cooldown_minutes"] / 60
+        delivered = self.alert(f"big_move_{'up' if move > 0 else 'down'}", text, now, hours)   # never wait for the AI
+        if delivered and summariser.available():
+            threading.Thread(target=self._explain, args=(move, now), daemon=True).start()
+
+    def _explain(self, move: float, now: datetime) -> None:
+        """Follow-up with the AI's view. If it fails, the alert has already gone out."""
+        note = summariser.explain_move(self.db, self.s["news"], move, news.fresh_unused(self.db, 6, 20, now))
+        if note:
+            self.send(f"About that BTC move:\n{note}")
 
     def status(self) -> str:
         view = read_view(self.db, down_after_hours=self.s["failsafe"]["monitor_down_block_hours"])
@@ -169,11 +199,13 @@ class Monitor:
         sched.add_job(self.calendar, "cron", hour=hour, minute=minute)
         sched.add_job(self.weekly, "cron", day_of_week="sun", hour=20, minute=0)
         sched.add_job(self.heartbeat, "interval", minutes=sched_cfg["heartbeat_minutes"])
+        sched.add_listener(self.on_job_error, EVENT_JOB_ERROR)
         threading.Thread(target=alerts_mod.run_forever, name="big-moves", daemon=True,
                          args=(self.db, self.s["stress"]["btc_1h_abs_return"],
                                self.s["alerts"]["big_move_cooldown_minutes"], self.on_big_move)).start()
-        if events.latest_saved(self.db) is None:
-            self.calendar()
+        refreshed = get_kv(self.db, "calendar_refresh_utc")
+        if refreshed is None or utc_now() - datetime.fromisoformat(refreshed) > timedelta(hours=24):
+            self.calendar()                     # the PC may have been off at 22:00
         self.hourly()
         log.info("Monitor running")
         sched.start()
@@ -197,7 +229,7 @@ def _format_ai(b: summariser.Briefing, upcoming: list[str], odds_lines: list[str
     order = {"high": 0, "medium": 1, "low": 2}
     lines = ["News briefing", "", b.summary, ""]
     for i in sorted(b.items, key=lambda x: order[x.importance])[:8]:
-        lines.append(f"[{i.importance}] {i.title}\n{i.link}")
+        lines.append(f"[{i.importance}] {i.title}" + (f"\n{i.link}" if i.link else ""))
     return "\n".join(lines + _footer(upcoming, odds_lines))
 
 

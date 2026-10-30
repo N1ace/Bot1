@@ -5,7 +5,8 @@ Safety (news-event-layer-spec.md section 5):
 - This module imports no flag, order or account code. Its only output is a briefing, and
   `venue_risk_binance` can only raise an alert asking a human to check.
 - Only titles, short summaries and links are sent, never keys, balances or positions.
-- A link is shown only if it came from our own feeds, so an article can't plant one.
+- A link is shown only if it came from our own feeds, and links in the free text are removed,
+  so an article can't plant one. A closing tag inside an article is escaped.
 - Every prompt and response is logged. Any failure returns None and raw headlines are sent.
 
 No API key set: nothing is called, and briefings stay raw headlines.
@@ -16,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +31,7 @@ log = logging.getLogger(__name__)
 
 # The current fallback form: on a safety refusal the API picks a fallback model by itself.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+URL = re.compile(r"(?:https?://|www\.)\S+", re.I)
 
 SYSTEM = """You summarise crypto and macro headlines for one trader's briefing.
 
@@ -68,12 +71,13 @@ def available() -> bool:
 def _news_block(items: list[NewsItem]) -> str:
     rows = [{"title": i.title, "summary": i.summary, "source": i.source, "also_in": i.also_in, "link": i.url}
             for i in items]
-    return "<untrusted_news>\n" + json.dumps(rows, ensure_ascii=False, indent=1) + "\n</untrusted_news>"
+    data = json.dumps(rows, ensure_ascii=False, indent=1).replace("<", "\\u003c")     # no fake closing tag
+    return f"<untrusted_news>\n{data}\n</untrusted_news>"
 
 
 def _ask(db: str | Path, cfg: dict, prompt: str, schema: type[BaseModel], client=None):
     """One structured call. Returns the parsed object, or None on any failure."""
-    client = client or anthropic.Anthropic(timeout=120.0)
+    client = client or anthropic.Anthropic(timeout=60.0, max_retries=1)
     try:
         response = client.beta.messages.parse(
             model=cfg["model"], max_tokens=cfg["max_output_tokens"], betas=[FALLBACK_BETA], fallbacks="default",
@@ -84,6 +88,9 @@ def _ask(db: str | Path, cfg: dict, prompt: str, schema: type[BaseModel], client
         return None
     except anthropic.APIStatusError as e:
         log.warning("Claude API error %s: %s", e.status_code, e.message)
+        return None
+    except Exception as e:  # noqa: BLE001 - the SDK raises while parsing bad JSON; raw headlines still go out
+        log.warning("Claude answer unusable: %s: %s", type(e).__name__, e)
         return None
     parsed = response.parsed_output if response.stop_reason in ("end_turn", "stop_sequence") else None
     if parsed is None:
@@ -96,10 +103,21 @@ def _ask(db: str | Path, cfg: dict, prompt: str, schema: type[BaseModel], client
     return parsed
 
 
-def only_known_links(briefing: Briefing, items: list[NewsItem]) -> Briefing:
-    """Drop items whose link didn't come from our feeds."""
+def strip_links(text: str) -> str:
+    return URL.sub("[link removed]", text)
+
+
+def clean_output(briefing: Briefing, items: list[NewsItem]) -> Briefing:
+    """Only links from our feeds survive. An item with an unknown link is dropped, unless it
+    warns about Binance: that warning stays, with the link blanked."""
     known = {i.url for i in items}
-    return briefing.model_copy(update={"items": [i for i in briefing.items if i.link in known]})
+    kept = []
+    for item in briefing.items:
+        if item.link not in known and not item.venue_risk_binance:
+            continue
+        kept.append(item.model_copy(update={"title": strip_links(item.title),
+                                            "link": item.link if item.link in known else ""}))
+    return briefing.model_copy(update={"summary": strip_links(briefing.summary), "items": kept})
 
 
 def summarise(db: str | Path, cfg: dict, items: list[NewsItem], upcoming: list[str], client=None) -> Briefing | None:
@@ -109,7 +127,7 @@ def summarise(db: str | Path, cfg: dict, items: list[NewsItem], upcoming: list[s
               + ("\n".join(upcoming) or "none") +
               "\n\nWrite a 2-4 sentence summary and list the items that matter, most important first.")
     briefing = _ask(db, cfg, prompt, Briefing, client)
-    return only_known_links(briefing, items) if briefing else None
+    return clean_output(briefing, items) if briefing else None
 
 
 def explain_move(db: str | Path, cfg: dict, move: float, items: list[NewsItem], client=None) -> str | None:
@@ -119,4 +137,4 @@ def explain_move(db: str | Path, cfg: dict, move: float, items: list[NewsItem], 
     prompt = (f"BTC moved {move:+.1%} in the last hour.\n\n{_news_block(items)}\n\nIn at most two sentences, say which "
               "of these reports might relate to the move, or say that none clearly does.")
     note = _ask(db, cfg, prompt, MoveNote, client)
-    return note.explanation if note else None
+    return strip_links(note.explanation) if note else None

@@ -99,13 +99,16 @@ async def _run(db: str | Path, limit: float, cooldown: float, on_move: Callable[
                     delay = 5
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
-                            move = handle_message(msg.data, watcher, liq)
-                            if move is not None:
-                                await asyncio.to_thread(on_move, move)
+                            try:                  # one bad message must not end the watcher
+                                move = handle_message(msg.data, watcher, liq)
+                                if move is not None:
+                                    await asyncio.to_thread(on_move, move)
+                            except Exception:     # noqa: BLE001 - logged, and the stream keeps going
+                                log.exception("Could not handle a stream message")
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError, KeyError) as e:
-            log.warning("Market stream dropped: %s", e)
+        except Exception as e:  # noqa: BLE001 - this thread must never die, it just reconnects
+            log.warning("Market stream dropped: %s: %s", type(e).__name__, e)
         await asyncio.sleep(delay)
         delay = min(delay * 2, 300)
 

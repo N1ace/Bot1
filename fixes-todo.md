@@ -60,7 +60,7 @@ Before going live: all section 7 gates must pass, and check whether the real acc
 
 ## News monitor: still to do
 
-- [ ] N1. Run the risk-reviewer agent on `src/monitor/` (spec section 10)
+- [x] ~~N1. Run the risk-reviewer agent on `src/monitor/` (spec section 10)~~ (done 2026-10-31)
 - [ ] N2. The order bot must call `read_view()` before every entry and use `gap_capped_qty()` (bot doesn't exist yet)
 - [ ] N3. Kill switch: the order bot must close positions when it's set (the monitor only sets the flag)
 - [ ] N4. Liquidation stress action: tighten the stop to 1x ATR for positions on the losing side (bot's job)
@@ -71,3 +71,36 @@ Before going live: all section 7 gates must pass, and check whether the real acc
 - [ ] N9. VPS, so it watches while the PC is off
 - [ ] N10. First real AI briefing, once `ANTHROPIC_API_KEY` is in `.env` (request shape checked offline only)
 - [ ] N11. Polish pass on alert texts after a few weeks of real use
+
+## News monitor: safety review 2026-10-31
+
+Fixed now, because alerts are the monitor's whole value today:
+
+- [x] ~~R1. Bad AI output skipped the raw headlines and could lose a big-move alert (S1)~~ (done 2026-10-31)
+- [x] ~~R2. The big-move thread could die silently (B2)~~ (done 2026-10-31)
+- [x] ~~R3. One error in the hourly job could cancel event blackouts (B3)~~ (done 2026-10-31)
+- [x] ~~R4. Kill switch alert could be lost; cooldown started before delivery (B5)~~ (done 2026-10-31)
+- [x] ~~R5. Real Binance warnings and opposite moves could be suppressed; DVOL alert repeated hourly (S2, S3)~~ (done 2026-10-31)
+- [x] ~~R6. Calendar running out or partly failing wasn't noticed; no refresh after the PC was off (B7)~~ (done 2026-10-31)
+- [x] ~~R7. Blind data sources weren't reported (S5)~~ (done 2026-10-31)
+- [x] ~~R8. Crashes under pythonw were invisible (S8; job errors now reach Telegram too)~~ (done 2026-10-31)
+- [x] ~~R9. Fake closing tag and planted links in AI text (S4)~~ (done 2026-10-31)
+
+Before the order bot connects:
+
+- [ ] R10. Fail-safe must prove real checks ran: record last good hourly check and last stream message, block entries if stale (B1)
+- [ ] R11. Kill switch must reject bad prices: sane band, bid/ask mids, two checks in a row, exact Kraken keys (B4)
+- [ ] R12. Fail-closed `safe_read_view()`, config value for the time limit, `Decimal` gap sizing through `RiskManager.review()` (B6)
+- [ ] R13. Only one monitor process at a time (S6)
+- [ ] R14. Move the monitor database out of OneDrive and turn on WAL (S7)
+- [ ] R15. Validate safety settings at load; `stable_min_venues` at least 2, no negative gap settings (S9)
+- [ ] R16. Bot-side alert when the monitor is down (it can't report its own death)
+- [ ] R17. Test gaps: real calendar snapshots, private data test that can fail, thread death, two instances
+
+Smaller notes:
+
+- [ ] R18. Attach log masking, load only needed names from `.env`, pin aiohttp, requests, pydantic, tzdata
+- [ ] R19. Liquidation counter resets on restart; blackout can open up to 59 minutes late, so the bot should read `events` too
+- [ ] R20. FOMC notation votes stored as decisions; a Dec/Jan meeting gets the wrong year; a UTC format in the BLS file would shift times
+- [ ] R21. Spec table says API errors set the kill switch; the code follows the safer rule. Correct the spec
+- [ ] R22. Kalshi odds and an AI weekly review aren't built (spec section 4 and 8)

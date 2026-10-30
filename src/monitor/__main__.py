@@ -40,7 +40,12 @@ def main() -> int:
     settings = load_settings()
     monitor = Monitor(settings)
     if args.command == "run":
-        monitor.run()
+        try:
+            monitor.run()
+        except Exception as e:                  # no console under pythonw: without this a crash is invisible
+            logging.exception("Monitor crashed")
+            monitor.send(f"The news monitor crashed: {type(e).__name__}. Alerts have stopped.")
+            raise
     elif args.command == "once":
         print("Calendar problems:", monitor.calendar() or "none")
         print("Market findings:", monitor.hourly() or "none")

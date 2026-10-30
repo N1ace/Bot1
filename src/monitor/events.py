@@ -68,13 +68,15 @@ def refresh(db: str | Path, session: requests.Session | None = None) -> list[str
     """Update saved dates. Returns problems for the owner; the old dates stay usable."""
     http = session or requests.Session()
     problems = []
-    for name, url, parse in (("BLS", BLS_ICS, parse_bls_ics), ("FOMC", FOMC_PAGE, parse_fomc_html)):
+    for name, url, parse, expected in (("BLS", BLS_ICS, parse_bls_ics, {"CPI", "NFP"}),
+                                       ("FOMC", FOMC_PAGE, parse_fomc_html, {"FOMC"})):
         try:
             resp = http.get(url, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             rows = parse(resp.content.decode("utf-8-sig", errors="replace"))
-            if not rows:
-                raise ValueError("no dates found, the page layout may have changed")
+            missing = expected - {k for k, _, _ in rows}
+            if missing:
+                raise ValueError(f"no {', '.join(sorted(missing))} dates found, the page layout may have changed")
         except (requests.RequestException, ValueError) as e:
             problems.append(f"{name} calendar could not be updated: {e}")
             continue
@@ -112,3 +114,18 @@ def latest_saved(db: str | Path) -> datetime | None:
     with connect(db) as con:
         row = con.execute("SELECT MAX(time_utc) FROM events").fetchone()
     return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+
+def running_out(db: str | Path, cfg: dict, now: datetime | None = None) -> list[str]:
+    """Kinds of event with no date far enough ahead: their blackouts are about to stop working."""
+    now = now or utc_now()
+    limit = now + timedelta(days=cfg["min_days_ahead"])
+    with connect(db) as con:
+        latest = dict(con.execute("SELECT kind, MAX(time_utc) FROM events GROUP BY kind").fetchall())
+    out = []
+    for kind in cfg["events"]:
+        last = datetime.fromisoformat(latest[kind]) if kind in latest else None
+        if last is None or last < limit:
+            out.append(f"Only {last:%Y-%m-%d} is saved as the last {kind} date. Blackouts stop after it, so check "
+                       "the official calendar has newer dates." if last else f"No {kind} dates saved: no blackouts.")
+    return out
