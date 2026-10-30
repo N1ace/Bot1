@@ -1,6 +1,7 @@
-"""Event-driven daily backtester for USDⓈ-M perpetuals.
+"""Event-driven backtester for USDⓈ-M perpetuals.
 
-One loop step per day (bar t, UTC). Order of events inside a day:
+One loop step per bar (daily by default; `BacktestConfig.bar` = 4h for the satellite).
+Below "day" means "bar". Order of events inside a bar:
 
   1. Funding settled at the bar open (00:00 UTC) is charged on the position held
      overnight - i.e. BEFORE today's order fills.
@@ -62,12 +63,15 @@ class BacktestConfig:
     stop_fill: str = "spec_strict"            # or "open_if_gap"
     use_funding: bool = True
     # Live exchange rules (verified 2026-10-28 on fapi.binance.com) so results reflect real lot sizes.
-    qty_step: dict[str, float] = field(default_factory=lambda: {"BTCUSDT": 0.001, "ETHUSDT": 0.001})
-    min_notional: dict[str, float] = field(default_factory=lambda: {"BTCUSDT": 50, "ETHUSDT": 20})
+    qty_step: dict[str, float] = field(default_factory=lambda: {
+        "BTCUSDT": 0.001, "ETHUSDT": 0.001, "SOLUSDT": 0.01, "BNBUSDT": 0.01, "XRPUSDT": 0.1, "DOGEUSDT": 1})
+    min_notional: dict[str, float] = field(default_factory=lambda: {
+        "BTCUSDT": 50, "ETHUSDT": 20, "SOLUSDT": 5, "BNBUSDT": 5, "XRPUSDT": 5, "DOGEUSDT": 5})
     # Liquidation: if equity at the day's worst mark price falls to maintenance margin
     # (|notional| x rate; BTCUSDT first tier ~0.4%), everything is closed at that price
     # and trading stops - like the account being liquidated on Binance.
     maint_margin_rate: float = 0.004
+    bar: pd.Timedelta = pd.Timedelta(days=1)  # bar length of the data handed in
 
     def slip(self, symbol: str) -> float:
         return self.slippage_bps.get(symbol, self.slippage_bps.get("default", 0)) / 10_000
@@ -103,7 +107,10 @@ class BacktestResult:
 
 
 def performance_metrics(equity: pd.Series) -> dict[str, float]:
-    """CAGR, annualised vol, Sharpe (rf=0, 365 days - crypto trades every day), max drawdown."""
+    """CAGR, annualised vol, Sharpe (rf=0, 365 days - crypto trades every day), max drawdown.
+    Intraday equity curves are first reduced to one value per day (the last one), so
+    daily and 4h sleeves are measured the same way."""
+    equity = daily_equity(equity)
     rets = equity.pct_change().dropna()
     years = max((equity.index[-1] - equity.index[0]).days / 365.0, 1e-9)
     cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1 if equity.iloc[-1] > 0 else -1.0
@@ -112,6 +119,13 @@ def performance_metrics(equity: pd.Series) -> dict[str, float]:
     max_dd = (equity / equity.cummax() - 1).min()
     return {"cagr": cagr, "vol": vol, "sharpe": sharpe, "max_drawdown": max_dd,
             "final_equity": equity.iloc[-1], "days": len(equity)}
+
+
+def daily_equity(equity: pd.Series) -> pd.Series:
+    """Equity at each day's last bar, labelled by that day (00:00 UTC). Daily curves pass through."""
+    if len(equity) < 2 or (equity.index[1] - equity.index[0]) >= pd.Timedelta(days=1):
+        return equity
+    return equity.groupby(equity.index.floor("D")).last()
 
 
 def round_qty(qty: float, step: float | None) -> float:
@@ -190,7 +204,7 @@ class Backtester:
                              "rate": rate, "amount": amount})
 
         for date in dates:
-            day_end = date + pd.Timedelta(days=1)
+            day_end = date + cfg.bar
             closed_today: list[tuple[str, float]] = []
             stopped_today: set[str] = set()
             for symbol, df in self.bars.items():

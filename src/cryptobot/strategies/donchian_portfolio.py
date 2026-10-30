@@ -74,7 +74,10 @@ def load_overlay_config(raw: dict) -> OverlayConfig:
 
 
 def load_strategy_config(path: str | Path = "config/strategy.yaml") -> tuple[StrategyConfig, RiskConfig, dict]:
-    """Returns (strategy settings, risk settings, raw dict for costs/symbols/regime/funding)."""
+    """Returns (strategy settings, risk settings, raw dict for costs/symbols/regime/funding).
+
+    `risk_profile:` in the file picks which hard limits apply (conservative by default;
+    config/core.yaml uses the owner's aggressive trading budget)."""
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     s, r = raw["strategy"], raw["risk"]
@@ -95,8 +98,9 @@ def load_strategy_config(path: str | Path = "config/strategy.yaml") -> tuple[Str
         dd_stop=float(r["dd_stop"]), losing_streak_count=int(r["losing_streak"]["count"]),
         losing_streak_mult=float(r["losing_streak"]["mult"]),
         losing_streak_trades=int(r["losing_streak"]["trades"]),
+        sizing=str(r.get("sizing", "risk")), max_position_risk=float(r.get("max_position_risk", 0.01)),
     )
-    validate_hard_limits(risk)
+    validate_hard_limits(risk, raw.get("risk_profile", "conservative"))
     return strat, risk, raw
 
 

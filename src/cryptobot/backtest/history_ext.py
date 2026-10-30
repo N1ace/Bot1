@@ -115,7 +115,9 @@ class ExtendedHistory:
         spot = self.store.bars(symbol, "spot")
         cutoff = fut.index.min() if len(fut) else spot.index.max() + pd.Timedelta(days=1)
         spot = spot[(spot.index >= pd.Timestamp(SPOT_START, tz="UTC")) & (spot.index < cutoff)]
-        return pd.concat([spot, fut]).sort_index()
+        if spot.empty:                     # coin had no spot market before its futures (e.g. SOL)
+            return fut
+        return pd.concat([spot, fut]).sort_index().astype(float)
 
     def funding(self, symbol: str) -> pd.DataFrame:
         """Binance funding + earlier proxies + assumed baseline, with a `source` column."""
@@ -133,7 +135,9 @@ class ExtendedHistory:
             first = bybit.index.min()
         assumed_idx = pd.date_range(pd.Timestamp(SPOT_START, tz="UTC"), first - pd.Timedelta(hours=1), freq="8h")
         assumed = pd.DataFrame({"rate": ASSUMED_RATE, "source": "assumed"}, index=assumed_idx)
-        out = pd.concat([assumed, bybit, early, main]).sort_index()
+        parts = [df for df in (assumed, bybit, early, main) if not df.empty]   # empty parts turn floats into objects
+        out = pd.concat(parts).sort_index()
+        out["rate"] = out["rate"].astype(float)
         out["interval_hours"] = out["interval_hours"].fillna(8) if "interval_hours" in out else 8
         return out[["interval_hours", "rate", "source"]]
 

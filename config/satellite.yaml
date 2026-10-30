@@ -1,0 +1,59 @@
+# SATELLITE sleeve of the core + satellite plan (owner's choice 2026-10-30, option C).
+# 4-hour swing trader: pullbacks in trends, mean reversion in chop (src/cryptobot/strategies/satellite.py).
+# Runs on its own capital (40%) - in live trading in its own Binance sub-account, because
+# one-way mode can't hold a core long and a satellite short on the same coin in one account.
+#
+# Settings below were fixed BEFORE running any backtest on them (no tuning on results).
+
+risk_profile: aggressive
+capital_share: 0.40
+
+strategy:
+  timeframe: 4h
+  tactics: [pullback, meanrev]
+  er_n: 20
+  er_trend: 0.30
+  er_chop: 0.15
+  adx_n: 14
+  adx_trend: 25
+  adx_chop: 18
+  trend_ema: 50                # daily EMA: trend direction
+  trend_slope_days: 10
+  pullback_ema: 20             # 4h EMA the price dips under and reclaims
+  atr_n: 14                    # 4h ATR
+  trend_stop_atr: 2.0
+  trend_trail_atr: 3.0
+  bb_n: 20
+  bb_std: 2.0
+  rsi_n: 14
+  rsi_low: 30
+  rsi_high: 70
+  mr_stop_atr: 1.5
+  mr_max_bars: 6               # 24 hours
+  funding_block_ann: 0.30
+
+symbols:
+  satellite: [BTCUSDT, ETHUSDT, SOLUSDT]   # deepest order books: costs matter more at 4h
+
+risk:
+  risk_per_trade: 0.01         # 1% of the sleeve per trade (more trades than the core, so smaller)
+  slip_buffer: {BTCUSDT: 0.25, ETHUSDT: 0.25, default: 0.5}
+  isolated_leverage: 3
+  stop_to_liq_max: 0.33
+  max_eff_leverage: 2.5
+  max_positions: 3
+  max_heat: 0.03
+  cluster: [BTCUSDT, ETHUSDT, SOLUSDT]
+  cluster_heat: 0.025
+  corr_floor: 0.7
+  max_net_notional: 2.5
+  daily_loss: 0.05
+  weekly_loss: 0.10
+  dd_steps: {0.15: 0.75, 0.25: 0.5}
+  dd_stop: 0.35                # KILL SWITCH
+  losing_streak: {count: 8, mult: 0.5, trades: 10}
+
+costs:
+  taker: 0.0005
+  maker: 0.0002
+  slippage_bps: {BTCUSDT: 3, ETHUSDT: 3, default: 6}

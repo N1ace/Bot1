@@ -125,6 +125,27 @@ python scripts/run_backtest.py            # buy & hold sanity check, with and wi
   range (gap fills at the bar extreme, as the spec requires), live lot sizes (0.001 BTC/ETH)
   and minimum order values, and account liquidation at maintenance margin.
 
+## Core + satellite (the trading plan, chosen 2026-10-30)
+
+Two sleeves on separate capital (live: separate Binance sub-accounts, because one-way mode
+can't hold a core long and a satellite short on the same coin in one account):
+
+| Sleeve | Config | What it does | Capital |
+|---|---|---|---|
+| Core | `config/core.yaml` | daily Donchian trend ensemble, 6 coins, longs + half-size shorts | 60% |
+| Satellite | `config/satellite.yaml` | 4h: pullbacks in trends, mean reversion in chop (BTC/ETH/SOL) | 40% |
+
+Both use `risk_profile: aggressive` (the owner's "ready to lose half" budget): bigger
+positions, kill switch at -35% drawdown, leverage still capped at 3x. Hard limits per
+profile live in `src/cryptobot/risk/portfolio.py` (`HARD_LIMITS_BY_PROFILE`).
+`config/strategy.yaml` keeps the cautious spec version for comparison.
+
+```powershell
+python scripts/download_history.py SOLUSDT BNBUSDT XRPUSDT DOGEUSDT        # daily candles for the core
+python scripts/download_history.py BTCUSDT ETHUSDT SOLUSDT --intraday 4h   # 4h candles for the satellite
+python scripts/validate_sleeves.py                                         # gates per sleeve + combined
+```
+
 ## Going live (later - order placement is not built yet)
 
 All of these are required; any one missing and the bot refuses to start:

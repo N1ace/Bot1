@@ -44,6 +44,12 @@ DATASETS = {
     "markPriceKlines": ("markPriceKlines/{s}/1d/{s}-1d-{ym}.zip", "mark"),
     "fundingRate": ("fundingRate/{s}/{s}-fundingRate-{ym}.zip", "funding"),
 }
+# Intraday candles for the satellite sleeve, stored as kind 'trade_4h' / 'mark_4h'.
+INTRADAY_DATASETS = {
+    "klines": ("klines/{s}/{i}/{s}-{i}-{ym}.zip", "trade_{i}"),
+    "markPriceKlines": ("markPriceKlines/{s}/{i}/{s}-{i}-{ym}.zip", "mark_{i}"),
+}
+INTERVAL_MS = {"1h": 3_600_000, "4h": 14_400_000}
 # Spot candles (from 2017-08) - only used to extend backtests to before futures existed.
 SPOT_DATASET = ("klines/{s}/1d/{s}-1d-{ym}.zip", "spot")
 
@@ -148,9 +154,22 @@ class MarketDataStore:
         """Spot daily candles (stored as kind 'spot'), used before futures history begins."""
         return sum(self._monthly_file(s, "spot", ym) for s in symbols for ym in months(start, end))
 
-    def _monthly_file(self, symbol: str, dataset: str, ym: str) -> int:
+    def update_intraday(self, symbols: list[str], interval: str = "4h", start: str = "2020-01") -> int:
+        """Intraday trade + mark candles (satellite sleeve). Funding comes from update()."""
+        added = 0
+        for symbol in symbols:
+            for name in INTRADAY_DATASETS:
+                for ym in months(start, last_complete_month()):
+                    added += self._monthly_file(symbol, name, ym, interval)
+            added += self._rest_top_up_bars(symbol, interval)
+        return added
+
+    def _monthly_file(self, symbol: str, dataset: str, ym: str, interval: str | None = None) -> int:
         if dataset == "spot":
             (template, kind), base, prefix = SPOT_DATASET, VISION_SPOT_BASE, "spot/"
+        elif interval:
+            (template, kind), base, prefix = INTRADAY_DATASETS[dataset], VISION_BASE, ""
+            template, kind = template.replace("{i}", interval), kind.format(i=interval)
         else:
             (template, kind), base, prefix = DATASETS[dataset], VISION_BASE, ""
         rel = template.format(s=symbol, ym=ym)
@@ -211,10 +230,33 @@ class MarketDataStore:
         self._db.commit()
         return added
 
+    def _rest_top_up_bars(self, symbol: str, interval: str) -> int:
+        """Closed intraday bars after the last packaged month, from the public REST API."""
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        step, added = INTERVAL_MS[interval], 0
+        for kind, path in ((f"trade_{interval}", "/fapi/v1/klines"), (f"mark_{interval}", "/fapi/v1/markPriceKlines")):
+            last = self._db.execute("SELECT MAX(open_time) FROM bars WHERE symbol=? AND kind=?",
+                                    (symbol, kind)).fetchone()[0]
+            start = last + step if last else None
+            while start is not None and start + step <= now_ms:
+                resp = self.http.get(f"{REST_BASE}{path}", timeout=30, params={
+                    "symbol": symbol, "interval": interval, "startTime": start, "limit": 1500})
+                resp.raise_for_status()
+                rows = [(to_ms(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5]))
+                        for k in resp.json() if to_ms(k[6]) < now_ms]          # closed bars only
+                if not rows:
+                    break
+                self._db.executemany("INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?,?)",
+                                     [(symbol, kind, *r) for r in rows])
+                added += len(rows)
+                start = rows[-1][0] + step
+        self._db.commit()
+        return added
+
     # ---- load --------------------------------------------------------------
 
     def bars(self, symbol: str, kind: str = "trade") -> pd.DataFrame:
-        """Daily bars indexed by UTC open time (oldest first)."""
+        """Bars indexed by UTC open time (oldest first). kind: trade, mark, spot, trade_4h, mark_4h."""
         df = pd.read_sql_query("SELECT open_time, open, high, low, close, volume FROM bars"
                                " WHERE symbol=? AND kind=? ORDER BY open_time", self._db, params=(symbol, kind))
         df.index = pd.to_datetime(df.pop("open_time"), unit="ms", utc=True)

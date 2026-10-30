@@ -51,6 +51,11 @@ class RiskConfig:
     losing_streak_count: int = 6
     losing_streak_mult: float = 0.5
     losing_streak_trades: int = 10
+    # "risk": size = the smaller of risk size and vol size (spec layer 1).
+    # "vol_target": size = vol size only, with a per-position ceiling: a stop hit may cost
+    #               at most max_position_risk of equity. The heat/cluster caps still apply.
+    sizing: str = "risk"
+    max_position_risk: float = 0.01
 
     def slip(self, symbol: str) -> float:
         return self.slip_buffer.get(symbol, self.slip_buffer.get("default", 0.5))
@@ -61,25 +66,46 @@ class RiskConfig:
         return 1 / self.isolated_leverage - self.maint_margin_rate
 
 
-# Spec "hard limit" column (strategy-risk-spec.md section 3): config may be stricter, never looser.
-HARD_LIMITS = {
-    "isolated_leverage": 3,       # = config.MAX_LEVERAGE_HARD_CAP
-    "max_eff_leverage": 2.5,
-    "max_positions": 6,
-    "max_heat": 0.03,
-    "cluster_heat": 0.015,
-    "max_net_notional": 2.0,
+# Hard limits per risk profile: config may be stricter, never looser.
+#   conservative = the spec's "hard limit" column (strategy-risk-spec.md section 3)
+#   aggressive   = the owner's trading budget (2026-10-30: "ready to lose half"):
+#                  kill switch at -35% drawdown leaves room for gaps before -50%.
+# Both keep the 3x leverage cap (= config.MAX_LEVERAGE_HARD_CAP).
+HARD_LIMITS_BY_PROFILE = {
+    "conservative": {
+        "isolated_leverage": 3, "max_eff_leverage": 2.5, "max_positions": 6, "max_heat": 0.03,
+        "cluster_heat": 0.015, "max_net_notional": 2.0, "risk_per_trade": 0.01, "stop_to_liq_max": 0.5,
+        "daily_loss": 0.03, "weekly_loss": 0.06, "dd_stop": 0.20, "max_position_risk": 0.01,
+    },
+    "aggressive": {
+        "isolated_leverage": 3, "max_eff_leverage": 2.5, "max_positions": 8, "max_heat": 0.10,
+        "cluster_heat": 0.06, "max_net_notional": 2.5, "risk_per_trade": 0.02, "stop_to_liq_max": 0.5,
+        "daily_loss": 0.06, "weekly_loss": 0.12, "dd_stop": 0.40, "max_position_risk": 0.03,
+    },
 }
+HARD_LIMITS = HARD_LIMITS_BY_PROFILE["conservative"]
 
 
-def validate_hard_limits(cfg: RiskConfig) -> None:
-    """Refuse a config that is looser than the spec's hard limits (used for anything that may trade)."""
-    too_high = {k: (getattr(cfg, k), v) for k, v in HARD_LIMITS.items() if getattr(cfg, k) > v}
+def validate_hard_limits(cfg: RiskConfig, profile: str = "conservative") -> None:
+    """Refuse a config that is looser than its profile's hard limits (used for anything that may trade)."""
+    if profile not in HARD_LIMITS_BY_PROFILE:
+        raise ValueError(f"Unknown risk profile {profile!r}; use one of {sorted(HARD_LIMITS_BY_PROFILE)}")
+    limits = HARD_LIMITS_BY_PROFILE[profile]
+    too_high = {k: (getattr(cfg, k), v) for k, v in limits.items() if getattr(cfg, k) > v}
     if too_high:
-        raise ValueError("Risk config above hard limits: " +
+        raise ValueError(f"Risk config above {profile} hard limits: " +
                          ", ".join(f"{k}={got} (max {limit})" for k, (got, limit) in too_high.items()))
-    if not 0 < cfg.risk_per_trade <= 0.01:
-        raise ValueError(f"risk_per_trade {cfg.risk_per_trade} outside (0, 1%]")
+    if cfg.sizing not in ("risk", "vol_target"):
+        raise ValueError(f"sizing must be 'risk' or 'vol_target', got {cfg.sizing!r}")
+    if cfg.risk_per_trade <= 0:
+        raise ValueError(f"risk_per_trade {cfg.risk_per_trade} must be > 0")
+    # Isolated margin: every position needs notional / leverage as margin. Keep 10% of the
+    # balance free for fees, funding and price moves, so total notional <= 0.9 x leverage.
+    if cfg.max_eff_leverage > 0.9 * cfg.isolated_leverage:
+        raise ValueError(f"max_eff_leverage {cfg.max_eff_leverage} needs more margin than "
+                         f"{cfg.isolated_leverage}x isolated leverage allows (max {0.9 * cfg.isolated_leverage:g})")
+    if not 0 < cfg.dd_stop or any(level >= cfg.dd_stop for level, _ in cfg.dd_steps):
+        raise ValueError("drawdown steps must all sit before the kill switch (dd_stop)")
 
 
 @dataclass(frozen=True)
@@ -102,9 +128,16 @@ def size_position(equity: float, symbol: str, inp: SymbolInput, cfg: RiskConfig,
     # Layer 2: the stop must trigger long before liquidation would.
     if stop_dist / inp.price > cfg.stop_to_liq_max * cfg.liq_distance:
         return 0.0, stop_dist
-    qty_risk = equity * r / (stop_dist * (1 + cfg.slip(symbol)))
     qty_vol = equity * cfg.vol_target_asset / (inp.vol_ann * inp.price)
-    return math.copysign(min(qty_risk, qty_vol) * abs(inp.signal), inp.signal), stop_dist
+    if cfg.sizing == "vol_target":
+        # Circuit breakers shrink r (drawdown steps, losing streak): shrink the vol size the same way.
+        scale = r / cfg.risk_per_trade if cfg.risk_per_trade > 0 else 0.0
+        ceiling = equity * cfg.max_position_risk / (stop_dist * (1 + cfg.slip(symbol)))
+        base = min(qty_vol * scale, ceiling * scale)
+    else:
+        qty_risk = equity * r / (stop_dist * (1 + cfg.slip(symbol)))
+        base = min(qty_risk, qty_vol)
+    return math.copysign(base * abs(inp.signal), inp.signal), stop_dist
 
 
 # ---- Layers 2-3: portfolio caps ---------------------------------------------------------

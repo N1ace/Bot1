@@ -1,0 +1,70 @@
+# CORE sleeve of the core + satellite plan (owner's choice 2026-10-30, option C).
+# Daily Donchian trend ensemble, now with shorts and 6 coins, sized for the owner's
+# trading budget: "ready to lose half" -> kill switch at -35% drawdown.
+# The cautious spec version stays in config/strategy.yaml for comparison.
+#
+# Settings below were fixed BEFORE running any backtest on them (no tuning on results).
+
+risk_profile: aggressive       # hard limits: src/cryptobot/risk/portfolio.py HARD_LIMITS_BY_PROFILE
+capital_share: 0.60            # core gets 60% of the capital (and of the risk), satellite 40%
+
+strategy:
+  name: donchian_ensemble_daily
+  timeframe: 1d
+  lookbacks: [10, 20, 30, 60, 90, 150, 250]
+  allow_shorts: true           # a trading bot must also earn when prices fall
+  short_weight: 0.5            # shorts at half size: crypto's long-run drift is up
+  rebalance_threshold: 0.20
+  atr_n: 20
+  k_atr: 3.0
+  vol_window: 60
+
+symbols:
+  core: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT]   # most liquid with history since 2020
+
+risk:
+  risk_per_trade: 0.015        # 1.5% of the sleeve lost if a full-size position hits its stop (was 0.5%)
+  vol_target_asset: 0.40       # (was 0.15)
+  slip_buffer: {BTCUSDT: 0.25, ETHUSDT: 0.25, default: 0.5}
+  isolated_leverage: 2         # the exchange setting; real exposure is capped below
+  stop_to_liq_max: 0.5         # stop must sit in the first half of the way to liquidation
+                               # (alt stops are wide: 3 x ATR can be 15-20% of the price)
+  max_eff_leverage: 1.8        # total notional <= 1.8 x sleeve equity (fits in 2x isolated margin)
+  max_positions: 6
+  max_heat: 0.08               # all stops hit at once -> -8% (was 2%)
+  cluster: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT]   # in a crash they all fall together
+  cluster_heat: 0.05
+  corr_floor: 0.7
+  max_net_notional: 1.8
+  daily_loss: 0.05             # -5% in a day -> no new risk until tomorrow
+  weekly_loss: 0.10
+  dd_steps: {0.15: 0.75, 0.25: 0.5}   # -15% -> 3/4 size, -25% -> half size
+  dd_stop: 0.35                # KILL SWITCH: -35% from the high -> flatten, stop, owner reviews
+  losing_streak: {count: 8, mult: 0.5, trades: 10}
+
+funding:
+  halve_above_ann: 0.30
+  exit_above_ann: 0.60
+
+regime:
+  enabled: true
+  btc_sma: 200
+  sma_slope_days: 20
+  er_n: 20
+  er_trend: 0.30
+  er_chop: 0.15
+  adx_n: 14
+  adx_trend: 25
+  adx_chop: 18
+  chop_mult: 0.5
+  vol_window: 30
+  vol_pct_window_days: 365
+  vol_high_pct: 0.90
+  vol_high_mult: 0.5
+  funding_z_block: 2.0
+  funding_z_days: 90
+
+costs:
+  taker: 0.0005
+  maker: 0.0002
+  slippage_bps: {BTCUSDT: 3, ETHUSDT: 3, default: 8}

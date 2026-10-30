@@ -1,5 +1,6 @@
 """Donchian ensemble (step 3) and portfolio risk layers 1-4 (step 4)."""
 
+import dataclasses
 import math
 
 import numpy as np
@@ -185,6 +186,30 @@ def test_config_above_hard_limits_is_refused():
             validate_hard_limits(RiskConfig(**bad))
 
 
+def test_aggressive_profile_allows_the_trading_budget_but_keeps_the_caps():
+    from cryptobot.risk.portfolio import validate_hard_limits
+    budget = RiskConfig(risk_per_trade=0.015, max_heat=0.08, cluster_heat=0.05, max_positions=6,
+                        max_eff_leverage=1.8, dd_steps=((0.15, 0.75), (0.25, 0.5)), dd_stop=0.35,
+                        daily_loss=0.05, weekly_loss=0.10)
+    with pytest.raises(ValueError):
+        validate_hard_limits(budget)                          # too much for the conservative profile
+    validate_hard_limits(budget, "aggressive")
+    for bad in (dict(isolated_leverage=4), dict(dd_stop=0.5), dict(risk_per_trade=0.03),
+                dict(max_eff_leverage=2.0),                   # 2x isolated can't margin 2x notional
+                dict(dd_steps=((0.15, 0.75), (0.40, 0.5)))):  # a step after the kill switch
+        with pytest.raises(ValueError):
+            validate_hard_limits(dataclasses.replace(budget, **bad), "aggressive")
+    with pytest.raises(ValueError):
+        validate_hard_limits(budget, "yolo")
+
+
+def test_repo_core_config_loads_with_aggressive_profile():
+    from cryptobot.strategies.donchian_portfolio import load_strategy_config
+    strat, risk, raw = load_strategy_config("config/core.yaml")
+    assert raw["risk_profile"] == "aggressive" and strat.allow_shorts
+    assert risk.isolated_leverage <= 3 and risk.dd_stop <= 0.40
+
+
 def test_repo_strategy_config_loads_and_passes_hard_limits():
     from cryptobot.strategies.donchian_portfolio import load_strategy_config
     strat, risk, raw = load_strategy_config("config/strategy.yaml")
@@ -275,3 +300,32 @@ def test_portfolio_stops_out_in_crash_and_does_not_buy_straight_back():
         # only a NEW breakout (after the signal reset) may re-enter: not within 10 days, and smaller
         assert after.iloc[0]["date"] >= stop_date + pd.Timedelta(days=10)
         assert after.iloc[0]["qty"] < held_before
+
+
+def test_vol_target_sizing_ignores_stop_distance_until_the_ceiling():
+    cfg = RiskConfig(sizing="vol_target", vol_target_asset=0.20, max_position_risk=0.03,
+                     risk_per_trade=0.015, slip_buffer={"default": 0.0})
+    inp = SymbolInput(price=100, atr=2, vol_ann=0.5, signal=1.0)          # stop 6% away
+    qty, _ = size_position(10_000, "X", inp, cfg, cfg.risk_per_trade)
+    assert qty == pytest.approx(10_000 * 0.20 / (0.5 * 100))              # 40 coins = $4,000
+    assert qty * 6 / 10_000 <= 0.03                                       # stop hit costs 2.4%
+    tight = dataclasses.replace(cfg, max_position_risk=0.01)
+    qty, _ = size_position(10_000, "X", inp, tight, cfg.risk_per_trade)
+    assert qty * 6 / 10_000 == pytest.approx(0.01)                        # ceiling takes over
+
+
+def test_vol_target_sizing_still_obeys_circuit_breakers():
+    cfg = RiskConfig(sizing="vol_target", vol_target_asset=0.20, max_position_risk=0.03,
+                     risk_per_trade=0.015, slip_buffer={"default": 0.0})
+    inp = SymbolInput(price=100, atr=2, vol_ann=0.5, signal=1.0)
+    full, _ = size_position(10_000, "X", inp, cfg, cfg.risk_per_trade)
+    half, _ = size_position(10_000, "X", inp, cfg, cfg.risk_per_trade * 0.5)
+    none, _ = size_position(10_000, "X", inp, cfg, 0.0)
+    assert half == pytest.approx(full / 2) and none == 0
+
+
+def test_bigger_bets_config_stays_inside_the_aggressive_limits():
+    from cryptobot.strategies.donchian_portfolio import load_strategy_config
+    _, risk, raw = load_strategy_config("config/core_big.yaml")
+    assert risk.sizing == "vol_target" and risk.max_position_risk <= 0.03 and risk.dd_stop == 0.35
+    assert risk.isolated_leverage <= 3 and raw["risk_profile"] == "aggressive"
