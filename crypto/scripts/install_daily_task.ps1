@@ -13,7 +13,7 @@ param([switch]$Remove, [string]$Time = "03:30")
 
 $TaskName = "cryptobot-daily"
 $Repo = Split-Path -Parent $PSScriptRoot
-$Python = Join-Path $Repo ".venv\Scripts\python.exe"
+$Python = Join-Path (Split-Path -Parent $Repo) ".venv\Scripts\python.exe"
 
 if ($Remove) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false

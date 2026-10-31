@@ -19,6 +19,9 @@ __pycache__/
 /logs/
 /data/
 /reports/
+/crypto/logs/
+/crypto/data/
+/crypto/reports/
 *.sqlite
 *.sqlite-journal
 

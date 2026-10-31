@@ -12,7 +12,7 @@ param([switch]$Remove)
 
 $TaskName = "cryptobot-monitor"
 $Repo = Split-Path -Parent $PSScriptRoot
-$Python = Join-Path $Repo ".venv\Scripts\pythonw.exe"
+$Python = Join-Path (Split-Path -Parent $Repo) ".venv\Scripts\pythonw.exe"
 
 if ($Remove) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

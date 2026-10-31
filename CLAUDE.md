@@ -1,28 +1,17 @@
-# CLAUDE.md — rules for working on this repo
+# CLAUDE.md - rules for working on this repo
 
-**Current focus: Binance USDⓈ-M perpetual futures, DEMO environment.**
-Read [binance-futures-bot-reference.md](binance-futures-bot-reference.md) for the decisions,
-roadmap and official doc links. Fetch the official Binance docs listed there instead of guessing.
-Strategy and risk model: [strategy-risk-spec.md](strategy-risk-spec.md) (daily Donchian
-ensemble, 6 risk layers, validation gates). Live trading only after its section 7 gates pass.
-Levels 0–6, allowed tactics and the advisor (bot suggests, owner decides):
-[bot-roadmap-and-principles.md](bot-roadmap-and-principles.md). Never skip a level; the bot
-never raises risk, leverage, parameters or its level by itself.
-Since 2026-10-30 the goal is an active trading bot, not an investment bot: two sleeves (`config/core_big.yaml`,
-`config/xs.yaml`) under `risk_profile: aggressive`. See the plan section in [README.md](README.md). Fix rules before a test,
-run it once: every variant counts in the Deflated Sharpe (`data/variants_log.csv`).
+**Current focus (2026-10-31): a day-trading bot for an FTMO funded account.** Plan and decisions:
+[ftmo-plan.md](ftmo-plan.md). New work lives in the repo root.
 
-**Freeze, since 2026-10-30:** the original bot and strategy are saved as tag `research-bot-v1`. Don't change
-them until the owner says so. New work is the order bot for the owner's own tactic and the news monitor.
+**Crypto is set aside in [crypto/](crypto/).** That folder holds the original crypto bot, the news monitor and the
+crypto research lab, with its own config, data and `.env`. Don't change it until the owner says so. The saved
+version is also tag `research-bot-v1`. Its Level 0 daily job keeps running (task `cryptobot-daily`, working folder
+`crypto/`). The news monitor is stopped; its task can be reinstalled with `crypto/scripts/install_monitor_task.ps1`.
+Binance facts, conventions and commands below apply to the crypto project.
 
-News & event monitor: [news-event-layer-spec.md](news-event-layer-spec.md), code in `src/monitor/`. Tighten-only:
-it has no order code and no exchange keys, and news or AI output can never set a risk flag.
+`docker-compose.yml` + `user_data/` are an old **Freqtrade** setup kept as a reference. Don't modify them.
 
-This repo holds two things side by side:
-
-- `src/cryptobot/` — **our own bot** (the main project). Spot mode is parked.
-- `docker-compose.yml` + `user_data/` — an existing **Freqtrade** setup, kept as a
-  reference. Do not modify it unless the user asks.
+Fix a tactic's rules before testing it, and run each test once: every attempt counts against skill-or-luck.
 
 ## Safety rules (always follow, no exceptions)
 
@@ -78,6 +67,6 @@ This repo holds two things side by side:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m cryptobot --minutes 10   # futures demo: startup routine + streams, no orders
+cd crypto; python -m cryptobot --minutes 10   # futures demo: startup routine + streams, no orders
 python -m pytest                   # run tests
 ```
