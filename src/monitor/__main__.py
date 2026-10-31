@@ -11,15 +11,19 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
+from cryptobot.logging_setup import _mask, register_secret
 from monitor.flags import clear_kill_switch
 from monitor.service import Monitor
-from monitor.store import load_settings
+from monitor.store import AlreadyRunning, load_settings, single_instance
+
+NEEDED_SECRETS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ANTHROPIC_API_KEY")
 
 
 def main() -> int:
@@ -28,17 +32,29 @@ def main() -> int:
     parser.add_argument("reason", nargs="?", default="")
     args = parser.parse_args()
 
-    load_dotenv(".env")
+    values = dotenv_values(".env")              # the monitor never needs the exchange keys
+    for name in NEEDED_SECRETS:
+        if values.get(name):
+            os.environ[name] = values[name]
+            register_secret(values[name])
     Path("logs").mkdir(exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
                         handlers=[RotatingFileHandler("logs/monitor.log", maxBytes=2_000_000, backupCount=3,
                                                       encoding="utf-8")])
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(_mask)
     logging.getLogger("httpx2").setLevel(logging.WARNING)   # request lines carry the Telegram token in the URL
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     settings = load_settings()
     monitor = Monitor(settings)
+    if args.command in ("run", "once"):
+        try:
+            lock = single_instance()            # held until this process ends
+        except AlreadyRunning as e:
+            print(f"{e}. Stop it first: Stop-ScheduledTask -TaskName cryptobot-monitor")
+            return 1
     if args.command == "run":
         try:
             monitor.run()

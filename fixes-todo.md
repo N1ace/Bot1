@@ -88,18 +88,18 @@ Fixed now, because alerts are the monitor's whole value today:
 
 Before the order bot connects:
 
-- [ ] R10. Fail-safe must prove real checks ran: record last good hourly check and last stream message, block entries if stale (B1)
-- [ ] R11. Kill switch must reject bad prices: sane band, bid/ask mids, two checks in a row, exact Kraken keys (B4)
-- [ ] R12. Fail-closed `safe_read_view()`, config value for the time limit, `Decimal` gap sizing through `RiskManager.review()` (B6)
-- [ ] R13. Only one monitor process at a time (S6)
-- [ ] R14. Move the monitor database out of OneDrive and turn on WAL (S7)
-- [ ] R15. Validate safety settings at load; `stable_min_venues` at least 2, no negative gap settings (S9)
+- [x] ~~R10. Fail-safe must prove real checks ran: record last good hourly check and last stream message, block entries if stale (B1)~~ (done 2026-10-31)
+- [x] ~~R11. Kill switch must reject bad prices: sane band, bid/ask mids, two checks in a row, exact Kraken keys (B4)~~ (done 2026-10-31)
+- [x] ~~R12. Fail-closed `safe_read_view()`, config value for the time limit, `Decimal` gap sizing through `RiskManager.review()` (B6)~~ (done 2026-10-31)
+- [x] ~~R13. Only one monitor process at a time (S6)~~ (done 2026-10-31)
+- [x] ~~R14. Move the monitor database out of OneDrive and turn on WAL (S7)~~ (done 2026-10-31)
+- [x] ~~R15. Validate safety settings at load; `stable_min_venues` at least 2, no negative gap settings (S9)~~ (done 2026-10-31)
 - [ ] R16. Bot-side alert when the monitor is down (it can't report its own death)
-- [ ] R17. Test gaps: real calendar snapshots, private data test that can fail, thread death, two instances
+- [x] ~~R17. Test gaps: real calendar snapshots, private data test that can fail, thread death, two instances~~ (done 2026-10-31)
 
 Smaller notes:
 
-- [ ] R18. Attach log masking, load only needed names from `.env`, pin aiohttp, requests, pydantic, tzdata
+- [x] ~~R18. Attach log masking, load only needed names from `.env`, pin aiohttp, requests, pydantic, tzdata~~ (done 2026-10-31)
 - [ ] R19. Liquidation counter resets on restart; blackout can open up to 59 minutes late, so the bot should read `events` too
 - [ ] R20. FOMC notation votes stored as decisions; a Dec/Jan meeting gets the wrong year; a UTC format in the BLS file would shift times
 - [ ] R21. Spec table says API errors set the kill switch; the code follows the safer rule. Correct the spec

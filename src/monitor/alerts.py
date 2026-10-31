@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Callable
 
 import aiohttp
 
+from monitor.flags import STREAM_KEY, mark_ok
 from monitor.market import log_liquidation_hour
 
 log = logging.getLogger(__name__)
@@ -91,6 +93,7 @@ def handle_message(raw: str, watcher: MoveWatcher, liq: LiquidationCounter) -> f
 async def _run(db: str | Path, limit: float, cooldown: float, on_move: Callable[[float], None]) -> None:
     watcher, liq = MoveWatcher(limit, cooldown), LiquidationCounter(db)
     delay = 5
+    proved = 0.0
     while True:
         try:
             async with aiohttp.ClientSession() as session:
@@ -100,6 +103,9 @@ async def _run(db: str | Path, limit: float, cooldown: float, on_move: Callable[
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:                  # one bad message must not end the watcher
+                                if time.monotonic() - proved >= 60:
+                                    mark_ok(db, STREAM_KEY)
+                                    proved = time.monotonic()
                                 move = handle_message(msg.data, watcher, liq)
                                 if move is not None:
                                     await asyncio.to_thread(on_move, move)

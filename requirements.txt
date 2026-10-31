@@ -21,3 +21,7 @@ tqdm==4.70.1            # progress bars used by pandas-ta
 APScheduler==3.11.3      # timed jobs
 feedparser==6.0.14       # reads RSS news feeds
 anthropic==2.3.0         # Claude API, for AI briefings
+aiohttp==3.14.5
+requests==2.34.2
+pydantic==2.14.1
+tzdata==2026.5

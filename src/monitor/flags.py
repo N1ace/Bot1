@@ -7,10 +7,12 @@ refused, and when several flags apply the most cautious one wins.
 News and the AI summariser have no route in: `set_flag` only accepts the writers in
 WRITERS, and summariser.py doesn't import this module (tests/test_monitor.py checks that).
 
-Fail-safe: if the monitor's heartbeat is older than `monitor_down_block_hours`, or there has
-never been one, `read_view` blocks new entries.
+Fail-safe: `read_view` blocks new entries unless three things are recent: the heartbeat, a
+fully successful hourly check, and a message from the live market stream. A running
+program that has stopped doing its job counts as down.
 
-A bot calls `read_view()` before every entry and on every reconciliation.
+A bot calls `safe_read_view()` before every entry and on every reconciliation. It treats any
+error reading the flags as "blocked".
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ WRITERS = {"calendar", "stress", "owner"}
 FLAGS = {"no_new_entries_until", "vol_mult", "block_adds_direction", "kill_switch"}
 DIRECTIONS = {"long", "short"}
 HEARTBEAT_KEY = "heartbeat_utc"
+HOURLY_KEY = "hourly_ok_utc"
+STREAM_KEY = "stream_msg_utc"
 
 
 @dataclass(frozen=True)
@@ -96,8 +100,27 @@ def beat(db: str | Path, now: datetime | None = None) -> None:
     set_kv(db, HEARTBEAT_KEY, iso(now or utc_now()))
 
 
+def mark_ok(db: str | Path, key: str, now: datetime | None = None) -> None:
+    """Proof that real work happened: an hourly check that fully ran, or a stream message."""
+    set_kv(db, key, iso(now or utc_now()))
+
+
+def _stale(db: str | Path, key: str, now: datetime, limit: timedelta) -> bool:
+    last = get_kv(db, key)
+    return last is None or now - datetime.fromisoformat(last) > limit
+
+
+def safe_read_view(db: str | Path, down_after_hours: float, now: datetime | None = None) -> RiskView:
+    """What a bot must call. If the flags can't be read for any reason, entries are blocked."""
+    try:
+        return read_view(db, now, down_after_hours)
+    except Exception as e:  # noqa: BLE001 - failing closed is the point
+        return RiskView(monitor_down=True, reasons=(f"flags unreadable: {type(e).__name__}",))
+
+
 def read_view(db: str | Path, now: datetime | None = None, down_after_hours: float = 2.0) -> RiskView:
-    """All active flags merged to the most conservative value. Expired flags are ignored."""
+    """All active flags merged to the most conservative value. Expired flags are ignored.
+    The live stream must be fresher than the other checks: a quarter of the limit."""
     now = now or utc_now()
     with connect(db) as con:
         rows = con.execute("SELECT flag, value, reason FROM risk_flags WHERE expires_at IS NULL OR expires_at > ?",
@@ -114,8 +137,10 @@ def read_view(db: str | Path, now: datetime | None = None, down_after_hours: flo
             blocked.add(value)
         elif flag == "kill_switch":
             kill = True
-    last = get_kv(db, HEARTBEAT_KEY)
-    down = last is None or now - datetime.fromisoformat(last) > timedelta(hours=down_after_hours)
+    limit = timedelta(hours=down_after_hours)
+    silent = [name for name, key, age in (("heartbeat", HEARTBEAT_KEY, limit), ("hourly check", HOURLY_KEY, limit),
+                                          ("market stream", STREAM_KEY, limit / 4)) if _stale(db, key, now, age)]
+    down = bool(silent)
     if down:
-        reasons.append("monitor silent: new entries blocked (fail-safe)")
+        reasons.append(f"monitor not working ({', '.join(silent)}): new entries blocked (fail-safe)")
     return RiskView(until, vol, frozenset(blocked), kill, down, tuple(reasons))

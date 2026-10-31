@@ -4,14 +4,16 @@ The `eval_*` functions are pure, so each trigger can be tested alone. `hourly_ch
 public data, applies the triggers and returns what the owner should be told.
 
 Actions only tighten. The kill switch asks a bot to close everything, so it needs market
-proof: USDT below $0.97 on at least two venues. A headline or repeated API errors never set
-it; the owner can, with `python -m monitor kill`.
+proof: USDT below $0.97 on at least two venues, measured twice a couple of minutes apart.
+Prices outside $0.50-1.50 are treated as bad data and ignored. A headline or repeated API
+errors never set it; the owner can, with `python -m monitor kill`.
 """
 
 from __future__ import annotations
 
 import logging
 import statistics
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,6 +27,8 @@ log = logging.getLogger(__name__)
 FAPI = "https://fapi.binance.com"
 DERIBIT = "https://www.deribit.com/api/v2/public/get_volatility_index_data"
 TIMEOUT = 20
+SANE_PRICE = (0.5, 1.5)     # a stablecoin quote outside this is a data error, not a depeg
+KRAKEN_KEYS = {"USDT": "USDTZUSD", "USDC": "USDCUSD"}
 
 
 # ---- triggers (pure) -----------------------------------------------------------------------
@@ -76,7 +80,7 @@ def eval_stablecoins(prices: dict[str, dict[str, float]], cfg: dict) -> tuple[st
     """prices: venue -> coin -> USD price. ('freeze' or 'kill', reason), or None."""
     need = cfg["stable_min_venues"]
     for coin in ("USDT", "USDC"):
-        quotes = {v: p[coin] for v, p in prices.items() if coin in p}
+        quotes = {v: p[coin] for v, p in prices.items() if coin in p and SANE_PRICE[0] <= p[coin] <= SANE_PRICE[1]}
         below_kill = [v for v, q in quotes.items() if q < cfg["stable_kill"]]
         below = [v for v, q in quotes.items() if q < cfg["stable_depeg"]]
         if coin == "USDT" and len(below_kill) >= need:
@@ -133,13 +137,15 @@ def fetch_stablecoins(http) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     try:
         data = _get(http, "https://api.kraken.com/0/public/Ticker", pair="USDTUSD,USDCUSD")["result"]
-        out["kraken"] = {coin: float(v["c"][0]) for coin, key in (("USDT", "USDT"), ("USDC", "USDC"))
-                         for k, v in data.items() if key in k}
+        out["kraken"] = {coin: (float(data[key]["a"][0]) + float(data[key]["b"][0])) / 2
+                         for coin, key in KRAKEN_KEYS.items() if key in data}
     except (requests.RequestException, KeyError, ValueError, TypeError) as e:
         log.warning("Kraken prices unavailable: %s", e)
     try:
-        out["bitstamp"] = {coin: float(_get(http, f"https://www.bitstamp.net/api/v2/ticker/{coin.lower()}usd/")["last"])
-                           for coin in ("USDT", "USDC")}
+        out["bitstamp"] = {}
+        for coin in ("USDT", "USDC"):
+            quote = _get(http, f"https://www.bitstamp.net/api/v2/ticker/{coin.lower()}usd/")
+            out["bitstamp"][coin] = (float(quote["bid"]) + float(quote["ask"])) / 2
     except (requests.RequestException, KeyError, ValueError, TypeError) as e:
         log.warning("Bitstamp prices unavailable: %s", e)
     try:
@@ -209,8 +215,13 @@ def hourly_check(db: str | Path, cfg: dict, http: requests.Session | None = None
                                           "confirm anything right now."))
         stable = eval_stablecoins(prices, cfg)
         if stable and stable[0] == "kill":
-            if set_flag(db, "kill_switch", True, "stress", stable[1], now=now):
-                found.append(("kill_switch", f"KILL SWITCH SET: {stable[1]}. A bot must close everything and wait for you."))
+            freeze_entries(db, stable[1], cfg["freeze_hours"], now)     # cautious at once, kill only if it lasts
+            time.sleep(cfg["stable_confirm_seconds"])
+            again = eval_stablecoins(fetch_stablecoins(http), cfg)
+            if not again or again[0] != "kill":
+                found.append(("stable_freeze", f"{stable[1]}, but not on the second look. Entries frozen."))
+            elif set_flag(db, "kill_switch", True, "stress", again[1], now=now):
+                found.append(("kill_switch", f"KILL SWITCH SET: {again[1]}. A bot must close everything and wait for you."))
         elif stable and freeze_entries(db, stable[1], cfg["freeze_hours"], now):
             found.append(("stable_freeze", f"{stable[1]}. Entries frozen for {cfg['freeze_hours']}h."))
 

@@ -20,7 +20,7 @@ from cryptobot.notifications.telegram import TelegramNotifier
 
 from monitor import alerts as alerts_mod
 from monitor import events, market, news, odds, summariser
-from monitor.flags import beat, read_view, set_flag
+from monitor.flags import HOURLY_KEY, beat, mark_ok, read_view, set_flag
 from monitor.store import connect, get_kv, iso, set_kv, utc_now
 
 log = logging.getLogger(__name__)
@@ -86,6 +86,8 @@ class Monitor:
                 self.alert(key, text)
         self._kill_reminder()
         beat(self.db)
+        if not any(key.startswith("check_failed") for key, _ in found):
+            mark_ok(self.db, HOURLY_KEY)        # only a fully working check counts for the fail-safe
         return [text for _, text in found]
 
     def calendar(self) -> list[str]:

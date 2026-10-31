@@ -3,6 +3,7 @@
 import ast
 import json
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,18 +11,24 @@ import pytest
 
 from monitor import events, market, news, odds, service, summariser
 from monitor.alerts import LiquidationCounter, MoveWatcher, handle_message
-from monitor.flags import beat, clear_kill_switch, read_view, set_flag
+from monitor.flags import HOURLY_KEY, STREAM_KEY, beat, clear_kill_switch, mark_ok, read_view, safe_read_view, set_flag
 from monitor.sizing import gap_capped_qty
-from monitor.store import connect, load_settings
+from monitor.store import AlreadyRunning, connect, load_settings, single_instance, validate_settings
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
 SRC = Path(__file__).parent.parent / "src" / "monitor"
 
 
+def healthy(path, when):
+    beat(path, when)
+    mark_ok(path, HOURLY_KEY, when)
+    mark_ok(path, STREAM_KEY, when)
+
+
 @pytest.fixture
 def db(tmp_path):
     path = str(tmp_path / "m.sqlite")
-    beat(path, NOW)
+    healthy(path, NOW)
     return path
 
 
@@ -55,7 +62,7 @@ def test_most_cautious_value_wins(db):
 
 def test_flags_expire(db):
     set_flag(db, "vol_mult", 0.5, "stress", "a", hours=1, now=NOW)
-    beat(db, NOW + timedelta(hours=2))
+    healthy(db, NOW + timedelta(hours=2))
     assert read_view(db, NOW + timedelta(hours=2)).vol_mult == 1.0
 
 
@@ -74,7 +81,7 @@ def test_news_and_ai_cannot_write_flags(db, writer):
 def test_kill_switch_stays_until_the_owner_clears_it(db):
     set_flag(db, "kill_switch", True, "stress", "USDT", now=NOW)
     later = NOW + timedelta(days=30)
-    beat(db, later)
+    healthy(db, later)
     assert read_view(db, later).kill_switch and not read_view(db, later).entries_allowed(later)
     assert clear_kill_switch(db, "checked", later) == 1
     assert not read_view(db, later + timedelta(seconds=1)).kill_switch
@@ -87,7 +94,7 @@ def test_kill_switch_cannot_be_turned_off_by_a_flag(db):
 
 def test_silent_monitor_blocks_new_entries(tmp_path, db):
     assert not read_view(db, NOW + timedelta(hours=2, minutes=1)).entries_allowed(NOW + timedelta(hours=3))
-    assert read_view(db, NOW + timedelta(hours=1)).entries_allowed(NOW + timedelta(hours=1))
+    assert read_view(db, NOW + timedelta(minutes=20)).entries_allowed(NOW + timedelta(minutes=20))
     never = str(tmp_path / "never.sqlite")
     assert read_view(never, NOW).monitor_down
 
@@ -100,11 +107,15 @@ def test_same_flag_is_not_stored_twice(db):
 # ---- sizing ----------------------------------------------------------------------------------
 
 def test_gap_cap_limits_the_loss_and_never_grows_a_position():
-    qty = gap_capped_qty(100, 20_000, 10)            # 2.5 x 10 = 25 per coin; 1.5% of 20,000 = 300
-    assert qty == pytest.approx(12)
-    assert gap_capped_qty(5, 20_000, 10) == 5
-    assert gap_capped_qty(-100, 20_000, 10) == pytest.approx(-12)
-    assert gap_capped_qty(1, 20_000, 0) == 0
+    D, step = Decimal, Decimal("0.001")
+    assert gap_capped_qty(D(100), D(20_000), D(10), step) == D(12)     # 2.5 x 10 = 25 per coin; 1.5% = 300
+    assert gap_capped_qty(D(5), D(20_000), D(10), step) == D(5)
+    assert gap_capped_qty(D(-100), D(20_000), D(10), step) == D(-12)
+    assert gap_capped_qty(D(1), D(20_000), D(0), step) == 0
+    assert gap_capped_qty(D("1.23456"), D(10**9), D(1), step) == D("1.234")   # rounds down to the step
+    with pytest.raises(TypeError):
+        gap_capped_qty(1.0, D(1), D(1), step)
+    assert gap_capped_qty(D(5), D(20_000), D(10), step, D(-1)) == 0            # a bad setting can't grow it
 
 
 # ---- calendar --------------------------------------------------------------------------------
@@ -189,6 +200,69 @@ def test_one_venue_cannot_trigger_the_kill_switch(cfg):
     assert market.eval_stablecoins({"a": {"USDC": 0.96}, "b": {"USDC": 0.96}}, s)[0] == "freeze"    # USDC never kills
 
 
+def test_bad_quotes_cannot_trigger_the_kill_switch(cfg):
+    assert market.eval_stablecoins({"a": {"USDT": 0.0}, "b": {"USDT": 0.0}}, cfg["stress"]) is None
+
+
+def test_a_one_sample_dip_only_freezes(db, cfg, monkeypatch):
+    prices = iter([{"a": {"USDT": 0.96}, "b": {"USDT": 0.96}}, {"a": {"USDT": 1.0}, "b": {"USDT": 1.0}}])
+    monkeypatch.setattr(market, "fetch_stablecoins", lambda http: next(prices))
+    cfg["stress"]["stable_confirm_seconds"] = 0
+    market.hourly_check(db, cfg["stress"], FakeHttp({}), NOW)
+    v = read_view(db, NOW)
+    assert not v.kill_switch and not v.entries_allowed(NOW)
+
+
+@pytest.mark.parametrize("key", [HOURLY_KEY, STREAM_KEY])
+def test_running_but_not_working_counts_as_down(tmp_path, key):
+    path = str(tmp_path / "x.sqlite")
+    healthy(path, NOW - timedelta(hours=3))
+    beat(path, NOW)
+    mark_ok(path, HOURLY_KEY if key == STREAM_KEY else STREAM_KEY, NOW)
+    assert read_view(path, NOW).monitor_down
+
+
+def test_a_failed_hourly_check_gives_no_proof_of_work(db, cfg):
+    later = NOW + timedelta(hours=3)
+    m = monitor(db, cfg)
+    m.hourly()                                  # every source fails in this fake
+    beat(db, later)
+    mark_ok(db, STREAM_KEY, later)
+    assert read_view(db, later).monitor_down
+
+
+def test_unreadable_flags_fail_closed(tmp_path, monkeypatch):
+    import monitor.flags as f
+    monkeypatch.setattr(f, "read_view", lambda *a: 1 / 0)
+    view = safe_read_view("x", 2.0, NOW)
+    assert view.monitor_down and not view.entries_allowed(NOW)
+
+
+def test_only_one_monitor_can_run():
+    lock = single_instance(47699)
+    with pytest.raises(AlreadyRunning):
+        single_instance(47699)
+    lock.close()
+
+
+@pytest.mark.parametrize("section,key,value", [("stress", "stable_min_venues", 1), ("stress", "stable_kill", 0.995),
+                                               ("gap_risk", "stop_fill_multiple", -1),
+                                               ("failsafe", "monitor_down_block_hours", 9)])
+def test_settings_that_weaken_safety_are_refused(cfg, section, key, value):
+    cfg[section][key] = value
+    with pytest.raises(ValueError):
+        validate_settings(cfg)
+
+
+def test_real_calendar_snapshots_parse():
+    root = Path(__file__).parent / "fixtures"
+    bls = events.parse_bls_ics((root / "bls.ics").read_text(encoding="utf-8"))
+    fomc = events.parse_fomc_html((root / "fomc.html").read_text(encoding="utf-8"))
+    assert {k for k, _, _ in bls} == {"CPI", "NFP"}
+    assert ("CPI", datetime(2026, 11, 10, 13, 30, tzinfo=timezone.utc), "Consumer Price Index") in bls
+    assert any(t == datetime(2026, 12, 9, 19, 0, tzinfo=timezone.utc) for _, t, _ in fomc)
+
+
 def test_liquidations_wait_for_a_week_of_logs(cfg):
     s = cfg["stress"]
     assert market.eval_liquidations([1.0] * 10 + [1e9], s) is None
@@ -219,14 +293,15 @@ def test_hourly_check_reports_every_failed_source_and_only_binance_freezes(db, c
 
 
 def test_kill_switch_set_only_from_two_venue_market_proof(db, cfg):
-    http = FakeHttp({"api.kraken.com": {"result": {"USDTZUSD": {"c": ["0.95"]}}},
+    http = FakeHttp({"api.kraken.com": {"result": {"USDTZUSD": {"a": ["0.95"], "b": ["0.95"]}}},
                      "api.coinbase.com": {"data": {"amount": "0.96"}}})
+    cfg["stress"]["stable_confirm_seconds"] = 0
     found = dict(market.hourly_check(db, cfg["stress"], http, NOW))
     assert read_view(db, NOW).kill_switch and "kill_switch" in found
 
 
 def test_one_venue_through_the_full_check_does_not_kill(db, cfg):
-    http = FakeHttp({"api.kraken.com": {"result": {"USDTZUSD": {"c": ["0.95"]}}}})
+    http = FakeHttp({"api.kraken.com": {"result": {"USDTZUSD": {"a": ["0.95"], "b": ["0.95"]}}}})
     market.hourly_check(db, cfg["stress"], http, NOW)
     assert not read_view(db, NOW).kill_switch
 
@@ -477,8 +552,10 @@ def test_venue_risk_in_news_only_alerts_it_never_sets_a_flag(db, cfg, monkeypatc
     monkeypatch.setattr(summariser, "summarise", lambda *a, **k: briefing(risk=True))
     m = monitor(db, cfg)
     m.briefing()
-    v = read_view(db, service.utc_now(), down_after_hours=1e6)
-    assert not v.kill_switch and v.entries_allowed(service.utc_now())
+    now = service.utc_now()
+    healthy(db, now)
+    v = read_view(db, now)
+    assert not v.kill_switch and v.entries_allowed(now)
     assert any("possible Binance problem" in t for t in m.notifier.texts)
 
 
@@ -498,7 +575,8 @@ def test_big_move_freezes_entries_and_alerts(db, cfg, monkeypatch):
     m = monitor(db, cfg)
     m.on_big_move(-0.07)
     now = service.utc_now()
-    assert not read_view(db, now, down_after_hours=1e6).entries_allowed(now)
+    healthy(db, now)
+    assert not read_view(db, now).entries_allowed(now)
     assert "-7.0%" in m.notifier.texts[0]
 
 

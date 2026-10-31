@@ -1,6 +1,6 @@
 # News & event-risk monitor (news-event-layer-spec.md). It can only make a trading bot MORE cautious.
 # All thresholds are starting points, not backtest results. Times are UTC.
-database: data/monitor.sqlite
+database: "%LOCALAPPDATA%/cryptobot/monitor.sqlite"    # outside OneDrive: syncing can lock a live database
 
 schedules:
   briefing_hours: [0, 3, 6, 9, 12, 15, 18, 21]
@@ -28,6 +28,7 @@ stress:
   stable_depeg: 0.99
   stable_kill: 0.97
   stable_min_venues: 2
+  stable_confirm_seconds: 120  # second look before the kill switch
   freeze_hours: 24
   binance_fail_limit: 3        # failed hourly health checks in a row -> alert + entries frozen
 

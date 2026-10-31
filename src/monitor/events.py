@@ -39,11 +39,12 @@ def parse_bls_ics(text: str) -> list[tuple[str, datetime, str]]:
     out = []
     for block in re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", unfolded, flags=re.S):
         title = re.search(r"^SUMMARY:(.*)$", block, flags=re.M)
-        start = re.search(r"^DTSTART[^:\n]*:(\d{8}T\d{6})", block, flags=re.M)
+        start = re.search(r"^DTSTART[^:\n]*:(\d{8}T\d{6})(Z?)", block, flags=re.M)
         if not title or not start or title.group(1).strip() not in BLS_KINDS:
             continue
         name = title.group(1).strip()
-        local = datetime.strptime(start.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=NEW_YORK)
+        zone = timezone.utc if start.group(2) else NEW_YORK      # a trailing Z means the file gave UTC
+        local = datetime.strptime(start.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=zone)
         out.append((BLS_KINDS[name], local.astimezone(timezone.utc), name))
     return out
 
