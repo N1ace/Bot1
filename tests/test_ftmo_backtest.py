@@ -130,3 +130,27 @@ def test_a_bar_touching_both_sides_skips_the_day():
 def test_range_uses_only_bars_before_the_open():
     days = range_days({490: (101, 300, 101, 101)})
     assert dax.levels(days, dax.SETTINGS).high[20] == 101
+
+
+def trailing_tactic(level):
+    tactic = fake_tactic(1, stop=0.5)
+    tactic.CHECK_MINUTES = (30, 60)
+    tactic.trail = lambda day, minute, position, lv: level
+    return tactic
+
+
+def test_tightened_stop_exits_between_checks():
+    days = with_trend(flat_days())
+    d = 20
+    days.low[d, 100] = 98.0
+    held = run(days, fake_tactic(1, stop=0.5), {}, 0.005).returns[d]
+    trailed = run(days, trailing_tactic(99.0), {}, 0.005).returns[d]
+    assert trailed < held
+
+
+def test_a_stop_past_the_next_open_is_ignored():
+    days = with_trend(flat_days())
+    d = 20
+    days.low[d, 100] = 98.0
+    held = run(days, fake_tactic(1, stop=0.5), {}, 0.005).returns[d]
+    assert run(days, trailing_tactic(150.0), {}, 0.005).returns[d] == held

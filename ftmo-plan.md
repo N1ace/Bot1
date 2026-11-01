@@ -139,7 +139,7 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 ## Lab results
 
 Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
-Full results are in `ftmo/lab_log.json`. 8 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
+Full results are in `ftmo/lab_log.json`. 9 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
 all. New tactics should set it as a percentage. That applies to new tests only.
 
 | Tactic | Result | Why |
@@ -152,6 +152,7 @@ all. New tactics should set it as a percentage. That applies to new tests only.
 | layered_breakout | FAIL, 2026-11-01 | Owner-approved exception. Sharpe 1.19, stability gap 0.38, luck check 0.84 |
 | noise_area_gold | FAIL, 2026-11-01 | noise_area unchanged on XAUUSD. Sharpe -0.67, lost in all 5 years, beat random 99% |
 | dax_overnight_range | FAIL, 2026-11-01 | Sharpe 0.76, luck check 0.46, beat only 87% of random. Stable, and all 4 years positive. GER40 commission assumed zero, not read from MT5 |
+| noise_trailing | FAIL, 2026-11-01 | Owner-approved exception. Broker stop tightened at each check. Sharpe 0.92, 0.19 at double costs, luck check 0.58. Trades rose from 744 to 1,198 |
 
 Lessons: the two good results both enter on a break during the day and hold to the close. Betting against moves lost, and
 30-minute trades left too little after costs. Stability is the shared weakness. Any new gate wording applies only to new

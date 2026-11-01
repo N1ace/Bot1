@@ -164,6 +164,12 @@ def run_one(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mu
                         trades += 1
             if position == 0:
                 continue
+            if hasattr(tactic, "trail"):
+                level = tactic.trail(d, start - 1, position, levels)
+                if position > 0 and level < o[start]:
+                    stop = max(stop, level)
+                elif position < 0 and level > o[start]:
+                    stop = min(stop, level)
 
             # Stop level: the tactic's own, or the price where today's loss reaches the bot's limit
             room = (pnl - DAY_STOP) / size * o[0]
