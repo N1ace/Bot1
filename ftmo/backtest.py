@@ -46,6 +46,11 @@ def load_days(symbol: str, include_holdout: bool = False) -> Days:
     bars = bars[bars["time"] >= FIRST_DAY]
     if not include_holdout:
         bars = bars[bars["time"] < HOLDOUT_START]
+    return build_days(bars, symbol)
+
+
+def build_days(bars: pd.DataFrame, symbol: str, keep_today: bool = False) -> Days:
+    """Shape bars into sessions. The live bot uses this too, with keep_today for the unfinished session."""
     ny = bars["time"] - pd.Timedelta(hours=SERVER_HOURS_AHEAD_OF_NY)
     minute = (ny.dt.hour * 60 + ny.dt.minute) - (9 * 60 + 30)
     keep = (minute >= 0) & (minute < SESSION_MINUTES)
@@ -55,6 +60,8 @@ def load_days(symbol: str, include_holdout: bool = False) -> Days:
     for column in ("open", "high", "low", "close", "tick_volume", "spread"):
         tables[column] = bars.pivot(index="day", columns="minute", values=column).reindex(columns=range(SESSION_MINUTES))
     complete = tables["close"].notna().sum(axis=1) >= MIN_BARS_PER_DAY
+    if keep_today:
+        complete.iloc[-1] = True
     for column, table in tables.items():
         table = table[complete].ffill(axis=1).bfill(axis=1)
         tables[column] = table.to_numpy(dtype=float)

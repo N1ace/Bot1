@@ -159,6 +159,17 @@ tactics and can't rescue a failed one.
 
 Failures stand. No lowering a gate, and no small variations under a new name.
 
+## Demo forward test
+
+`ftmo/bot.py` runs noise_area on an MT5 demo, to collect results on new prices. noise_area failed its lab test, so this
+is not approval for a paid account. Run for at least 3-6 months, then compare with the backtest.
+
+- Dry run by default. Orders need `--place-demo-orders --login <number>`, and a non-demo account is refused.
+- Same code as the backtest: bot and backtest levels matched at 24 sample moments.
+- Stops at the broker, -3% day and -7% total limits, flat by 15:59 New York and around FOMC, 1,000 requests a day at most.
+- A paid challenge also shows as a demo account, so the login check is what keeps the bot off one.
+- Not done: a longer demo account than the 14-day trial, and a safety review before the first order.
+
 ## Build order
 
 1. Owner asks FTMO: Israel accepted? Own bot allowed? What counts as hyperactive? Do Classic and Futures differ?
