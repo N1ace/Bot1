@@ -18,7 +18,8 @@ SERVER_HOURS_AHEAD_OF_NY = 7  # checked against the US open across 2022-2026
 SESSION_MINUTES = 390  # 09:30 to 16:00 New York
 MIN_BARS_PER_DAY = 380
 
-MEASURED_SPREAD = {"US100.cash": 1.45, "US500.cash": 0.60}  # MT5, US hours, 2026
+MEASURED_SPREAD = {"US100.cash": 1.45, "US500.cash": 0.60, "XAUUSD": 0.40}  # MT5, US hours, 2026
+COMMISSION_PER_SIDE = {"XAUUSD": 0.000007}  # 0.0007% of the trade, from MT5. Indices have none
 SLIPPAGE_SHARE = 0.25  # each fill also loses a quarter of the spread
 
 DAY_STOP = -0.03  # the bot's own limits, inside FTMO's 5% and 10%
@@ -37,6 +38,7 @@ class Days:
     close: np.ndarray
     ticks: np.ndarray
     spread: np.ndarray
+    commission: float = 0.0
 
 
 def load_days(symbol: str, include_holdout: bool = False) -> Days:
@@ -61,6 +63,7 @@ def load_days(symbol: str, include_holdout: bool = False) -> Days:
         dates=pd.DatetimeIndex(complete[complete].index),
         open=tables["open"], high=tables["high"], low=tables["low"], close=tables["close"],
         ticks=tables["tick_volume"], spread=np.maximum(tables["spread"], floor),
+        commission=COMMISSION_PER_SIDE.get(symbol, 0.0),
     )
 
 
@@ -123,7 +126,7 @@ def run_one(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mu
         halted = False
 
         def fee(minute: int) -> float:
-            return size * (cost_mult * spread[minute] * (0.5 + SLIPPAGE_SHARE)) / o[0]
+            return size * cost_mult * (spread[minute] * (0.5 + SLIPPAGE_SHARE) / o[0] + days.commission)
 
         for start, end in zip(checks, checks[1:] + [SESSION_MINUTES - 1]):
             if not halted:

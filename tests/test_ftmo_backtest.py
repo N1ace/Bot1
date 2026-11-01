@@ -86,3 +86,10 @@ def test_layers_share_the_position_equally():
     layered.LAYERS = (1, 2)
     layered.layer_settings = lambda settings, layer: settings
     assert np.allclose(run(days, layered, {}, 0.005).returns, run(days, single, {}, 0.005).returns)
+
+
+def test_commission_is_charged_on_both_sides():
+    days = with_trend(flat_days())
+    free = run(days, fake_tactic(1), {}, 0.005).returns
+    days.commission = 0.001
+    assert (run(days, fake_tactic(1), {}, 0.005).returns[free != 0] < free[free != 0]).all()

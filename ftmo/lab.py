@@ -23,7 +23,7 @@ from ftmo.backtest import challenge_odds, load_days, run, sharpe
 norm = NormalDist()
 LOG = Path(__file__).resolve().parent / "lab_log.json"
 MAX_TACTICS = 12
-SYMBOL = "US100.cash"  # the gates apply here; US500 is shown for information only
+SYMBOL = "US100.cash"  # the gates apply here unless a tactic names its own; US500 is for information only
 TEST_VOL = 0.005  # a quarter of the paper's 2% target
 CHALLENGE_VOLS = (0.005, 0.01, 0.02)
 RANDOM_RUNS = 200
@@ -78,7 +78,7 @@ def look_ahead_check(days, tactic) -> bool:
 
 def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
     tactic = importlib.import_module(f"ftmo.tactics.{name}")
-    days = load_days(SYMBOL, include_holdout)
+    days = load_days(getattr(tactic, "SYMBOL", SYMBOL), include_holdout)
     base = run(days, tactic, tactic.SETTINGS, TEST_VOL)
     s = sharpe(base.returns)
 
@@ -140,7 +140,8 @@ def main() -> None:
             raise SystemExit("Refused: changing a tested tactic means a new tactic and a new name.")
         if len({e["name"] for e in log}) >= MAX_TACTICS:
             raise SystemExit("Refused: tactic budget is used up.")
-        if not look_ahead_check(load_days(SYMBOL), importlib.import_module(f"ftmo.tactics.{args.name}")):
+        tactic = importlib.import_module(f"ftmo.tactics.{args.name}")
+        if not look_ahead_check(load_days(getattr(tactic, "SYMBOL", SYMBOL)), tactic):
             raise SystemExit("Refused: the tactic looks into the future.")
     else:
         passes = [e for e in tested if e["fingerprint"] == print_me and e["result"]["all_passed"]]
