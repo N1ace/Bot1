@@ -145,7 +145,6 @@ all. New tactics should set it as a percentage. That applies to new tests only.
 | Tactic | Result | Why |
 |---|---|---|
 | noise_area | FAIL, 2026-11-01 | 6 of 7 gates passed, Sharpe 1.48. Failed stability: a 20% settings change moved Sharpe by 0.52, limit 0.25 |
-
 | first_half_hour | FAIL, 2026-11-01 | Sharpe -1.39, lost in all 5 years, no better than random direction |
 | vwap_fade | FAIL, 2026-11-01 | Sharpe -0.97, lost in all 5 years, negative even with no costs |
 | quiet_day_breakout | FAIL, 2026-11-01 | Sharpe 1.09, but stability gap 0.88 and luck check 0.84 |
@@ -158,6 +157,28 @@ Lessons: the two good results both enter on a break during the day and hold to t
 tactics and can't rescue a failed one.
 
 Failures stand. No lowering a gate, and no small variations under a new name.
+
+## What the tactics report changed (owner's report, 2026-11-01)
+
+Secondary and vendor sources are mixed in. Treat every published backtest as an upper bound.
+
+- **Published edges decay.** noise-band momentum is reported at Sharpe 0.39 for May 2024 to March 2026, against 1.34
+  before it, and 9.4% against 29.5% for buy-and-hold. One point of stop slippage removed 22% of its edge on NQ micros.
+  Expect far less than our 1.48 in the demo. Our hidden data starts in May 2025, inside that weak period.
+- **Our failures fit this report.** Unconditional last-30-minute momentum is reported gone since 2022 (t = 0.6), which
+  matches first_half_hour and big_day_last_half_hour. VWAP reversion is reported to need positive gamma, and ours had no gate.
+- **Regime may be the missing piece.** Dealer gamma sign is the best-supported driver: negative favours momentum,
+  positive favours reversal. Needs paid data. VIX above 17-20 is a cheaper stand-in. Adding either to a failed tactic is
+  a new tactic and needs the owner's approval.
+- **Next candidate: DAX overnight-range breakout.** Range 03:00-09:00 Frankfurt, trade the break at the Xetra open, stop
+  at the other side, 2R target, flat by 13:00 CET. Vendor backtest, seller of VPS: PF 1.25, Sharpe 1.46, 2013-2026. One
+  trade a day at 10:00 Israel time. Needs GER40 history and a simulator that handles other sessions.
+- **Swing option:** IBS or RSI(2) pullbacks above the 200-day average. Needs the FTMO Swing account (1:30 leverage) and
+  overnight costs in the simulator. Edge has roughly halved since the 1990s.
+- **Skip:** turn-of-month, the 80% rule (measured 40-67%), closing-imbalance trades, news straddles, and all true
+  arbitrage. Feed arbitrage is banned at FTMO, and a Python bot is too slow to compete.
+- **Bot additions before any paid account:** CPI, NFP and PPI blackouts, cancel orders 6 minutes before news because a
+  stop filling inside FTMO's window can count, a spread filter at 2x normal, and a volatility-spike block.
 
 ## Demo forward test
 
