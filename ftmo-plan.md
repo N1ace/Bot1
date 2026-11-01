@@ -8,11 +8,100 @@ marked official, and FTMO changes its rules, so confirm them before paying.
 | Topic | Decision |
 |---|---|
 | Firm | FTMO |
-| Product | FTMO Classic (CFD), 2-Step, smallest account |
+| Product | FTMO Classic (CFD), 2-Step, Standard, $10,000 first, then $100,000 |
+| Platform | MetaTrader 5, on the owner's Windows PC. Check the Python package installs first |
 | Backup product | FTMO Futures, Pro 50K, if bots are confirmed there |
 | Markets | US100 first, US500 second, XAUUSD third. EURUSD later |
 | Order | Build and backtest with all fees first. Pay only after a tactic passes |
 | Style | Day trading, no scalping |
+
+## What the index research report changed (owner's report, 2026-10-31)
+
+Most of it comes from third-party or affiliate sites. FTMO's forbidden-practices page is the one official FTMO source.
+
+- **The rules decide the outcome more than the entry signal.** The simulator must replay FTMO's rules and report how
+  often an attempt passes, not only profit. A reported 14% of challenges pass and 7% of buyers ever get paid.
+- **Avoid rushing.** In the report's simple model, with Sharpe 1.0 and needing +10% before -10%: about 88% pass at 10%
+  yearly volatility, taking about 9 months; about 62% pass at 40%. Real odds are lower. No time limit is why we keep
+  2-Step.
+- **Tactic order after the owner's own:**
+  1. Noise-area momentum with a VWAP trailing stop: checked twice an hour, flat at the US close. Published Sharpe 1.33
+     after costs on SPY, 2007-2024, no live record. The exit and the sizing made most of the gain.
+  2. First half-hour predicts last half-hour: one trade a day. Data ends 2012, so it may have faded.
+- **Skip without testing:** 5-minute opening-range breakout (about zero after CFD costs, 24% win rate), ICT/fair-value
+  gaps, gap fills, overnight drift, pre-FOMC drift, grid and martingale. Our crypto trend style doesn't fit either.
+- **Filters, not signals:** 200-day average and VIX or volatility level can adjust risk.
+- **Every test also beats a random-direction version**, a new gate for the lab.
+- **Volume gap:** CFD feeds have no true exchange volume, so VWAP needs a stand-in. Decide and test this before the tactic.
+- **US100 and US500 are one bet.** Never count them as diversification.
+- **All session times use `America/New_York`.** Israel and US clocks drift apart for a few weeks each year.
+- **Risk per trade is capped by the 20-loss test:** 0.5% of the account, so 20 straight losses cost about the whole 10%
+  limit. That is the ceiling. The bot's -7% stop means testing below it.
+- **Keep the crypto plumbing, not the tactic:** stop-based sizing, broker-side stops, reconciliation, kill switch, journal.
+- **Tax:** a payout may count as business income, not capital gains. See an Israeli accountant before the first payout.
+
+## Pricing differs by product
+
+Classic and Futures can't be compared on the headline price.
+
+- **Futures:** a monthly charge (from the checkout screens below), so a slow attempt costs more the longer it runs.
+- **Classic 2-Step:** a one-time payment (checkout), reported as refunded with the first reward, with no time limit.
+
+Classic 2-Step checkout prices, 2026-11-01, including VAT, USD account, paid in EUR:
+
+| Balance | Standard | Fee as % of balance | Swing |
+|---|---|---|---|
+| $10,000 | EUR 89 | 0.89% | EUR 99 |
+| $25,000 | EUR 250 | 1.00% | EUR 279 |
+| $50,000 | EUR 345 | 0.69% | EUR 379 |
+| $100,000 | EUR 439 (19% off, normally EUR 540) | 0.44% | EUR 599 |
+| $200,000 | EUR 1,080 | 0.54% | EUR 1,080 |
+
+First attempt: Standard $10,000 at EUR 89, a test of the real bot. If it passes and works, move to Standard $100,000,
+the cheapest for its size. Check first that the smallest lot allows our risk per trade on $10,000.
+
+Compare the expected total cost per attempt: price, months needed and the chance of passing. The simulator supplies the
+last two. Until then Classic stays the pick, because our plan is to pass slowly.
+
+## Classic products (FTMO checkout, 2026-11-01)
+
+| | 2-Step (our pick) | 1-Step | Instant |
+|---|---|---|---|
+| Profit target | 10%, then 5% | 10% | None |
+| Total loss | 10% | 10%, trails at end of day | 10%, trails during the day |
+| Daily loss | 5% | 3% | 3% |
+| Consistency | None shown | 50% | 30% |
+| Minimum days | 4 | None shown | None shown |
+| Trading period | Unlimited | Unlimited | Unlimited |
+| Rewards | Up to 90% | 90% | 90% |
+
+Instant is the worst fit: its limit trails open profits, and a 30% cap penalises our best days. Its price isn't known yet.
+
+## FTMO symbol details (MT5 Specification, trial account, 2026-11-01)
+
+| | US500.cash | UK100.cash (not a target) |
+|---|---|---|
+| Contract size, profit currency | 1, USD | 1, GBP |
+| Min lot, step | 0.01, 0.01 | 0.01, 0.01 |
+| Commission | 0 | 0 |
+| Margin | 2% (1:50) | 2% (1:50) |
+| Stops level | 0 | 0 |
+| Swap long, short (points) | -175.78, -8.27 | -261.64, +6.71 |
+| Triple swap | Friday | Friday |
+| Trading hours (server time) | Mon-Fri 01:05-23:50 | Mon-Thu 01:05-23:50, Fri 01:05-22:50 |
+
+Orders need Fill or Kill or Immediate or Cancel. Tick size and value are rounded on screen: read exact values from MT5.
+Server clock: the US open showed at 16:30 server time on 2026-10-26 to 30, while US summer time still applied. That
+means New York + 7 hours, so the US close is 23:00 server. Confirm once after the US clock change.
+
+Measured through the `MetaTrader5` package (5.0.6231, installed in `.venv`, read-only so far), 2026-07-22 to 2026-10-30,
+US hours, from the spread stored on 1-minute bars: these may hide brief news spikes and exclude slippage, and come from
+a demo account. Bars available: 1-minute about 100 days, hourly from December 2017.
+US100.cash: contract 1 in USD, min lot and step 0.01, commission 0, margin 2% (about $568 per lot), stops level 0,
+swap -719.83 long and +22.71 short (points), triple swap Friday, hours Mon-Fri 01:05-23:50.
+
+XAUUSD: contract 100 oz, min lot and step 0.01, commission 0.0007% per side, margin about $7,748 per lot, stops level 0,
+swap -64.8 long and -4.2 short (points), triple swap Wednesday, hours 01:05-23:50 every weekday including Friday.
 
 ## Why these markets
 
@@ -20,9 +109,9 @@ Cost of one round trip. Spread figures are an undated snapshot and need checking
 
 | Symbol | Commission | Spread snapshot | Estimated cost | Note |
 |---|---|---|---|---|
-| US100 | None (FTMO blog) | ~1.7 points | ~0.01% | Big daily moves for its cost |
-| US500 | None (FTMO blog) | ~0.55 points | ~0.01% | Steadier, the same news drives it |
-| XAUUSD | ~0.0014% of volume, sources differ | Not found | Check | Strong moves, spread widens on news |
+| US100 | None (MT5) | 1.45 points (measured) | ~0.005% | Big daily moves for its cost |
+| US500 | None (MT5) | 0.60 points (measured) | ~0.008% | Steadier, the same news drives it |
+| XAUUSD | 0.0014% round trip (MT5) | $0.40 (measured) | ~0.012% | Strong moves, spread widens on news |
 | EURUSD | ~$5 per lot round trip | Not found | ~0.01% | Small daily moves, heaviest professional competition |
 | Crypto CFDs | Not checked | Not checked | Likely highest | Weekends unlike the rest; we've left crypto |
 
@@ -30,15 +119,33 @@ Our crypto model cost about 0.16%, so these are roughly 15 times cheaper, if the
 
 ## FTMO Classic 2-Step rules to build in
 
-- Step 1 target 10%, step 2 target 5%. No time limit reported. At least 4 trading days per step.
-- 5% daily loss limit, measured on equity and including open trades. Resets at midnight Central European Time.
+- Step 1 target 10%, step 2 target 5%. Unlimited trading period. Minimum 4 trading days (checkout; per step reported).
+- 5% daily loss limit, including open trades. Resets at midnight Central European Time. Sources differ on whether
+  it starts from balance or equity at midnight: the bot uses the stricter, whichever is lower.
 - 10% total loss limit, static.
 - Leverage reported: indices 1:50, forex 1:100, metals 1:30.
-- No trading within 2 minutes of high-impact news on funded accounts (one source).
+- Funded Standard accounts: no opening or closing within 2 minutes of major news, and close before weekends and
+  before rollover gaps over 2 hours. Challenges reportedly have neither rule. The bot follows them from day one, flat
+  5 minutes either side of CPI, NFP and FOMC, so it doesn't learn habits that break funded rules.
+- Official page (modified 2026-10-12): hyperactive means over 2,000 server requests a day. Also banned: gap trading
+  (opening within 2 hours of a close of 2 hours or more), sharply varying position sizes, and "AI, software,
+  ultra-high-speed tools or mass data entry" giving an unfair edge. That wording is broad: get FTMO's written answer.
+- Size changes stay small from day to day. No tick-by-tick stop updates.
 - Banned: tick scalping that exploits delays, latency or high-frequency arbitrage, martingale, grid,
   hyperactive EAs, mirroring others' trades.
 
 The bot stops well before each limit. Starting values: stop for the day at -3%, and stop everything at -7%.
+
+## Lab results
+
+Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
+Full results are in `ftmo/lab_log.json`. 1 of 12 tactics used.
+
+| Tactic | Result | Why |
+|---|---|---|
+| noise_area | FAIL, 2026-11-01 | 6 of 7 gates passed, Sharpe 1.48. Failed stability: a 20% settings change moved Sharpe by 0.52, limit 0.25 |
+
+The failure stands. No lowering the gate, and no small variations under a new name.
 
 ## Build order
 
@@ -53,8 +160,13 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 
 ## Open questions
 
-- [ ] Does FTMO accept residents of Israel?
-- [ ] FTMO's official bot rules, on Classic and on Futures
+- [x] ~~Does FTMO accept residents of Israel?~~ Yes for buying: the owner registered with Israeli residency and can buy (2026-11-01)
+- [x] ~~Are bots allowed?~~ Yes within the request limit, per the owner (2026-11-01)
+- [ ] Does that answer cover Futures as well as Classic?
+- [x] ~~Classic checkout price for each account size~~ See the pricing table
+- [ ] Smallest lot on US100 and US500, and its value per point
+- [ ] Israel at payout too, not only at purchase, and which payout method works there
+- [ ] Does "AI, software" in the forbidden list cover our own rule-based bot? Written answer
 - [ ] Exact fee for the smallest Classic 2-Step account
 - [ ] Exact spreads and overnight costs per symbol
 - [ ] Are swap costs avoided if every position closes the same day?
