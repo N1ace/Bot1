@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS reactions (
     event_id TEXT NOT NULL REFERENCES events(id), symbol TEXT NOT NULL, window TEXT NOT NULL, return_pct REAL NOT NULL,
     range_pct REAL NOT NULL, pre_vol_pct REAL, PRIMARY KEY (event_id, symbol, window)
 );
+CREATE TABLE IF NOT EXISTS predictions (
+    event_id TEXT NOT NULL, symbol TEXT NOT NULL, window TEXT NOT NULL, q25 REAL, q50 REAL, q75 REAL,
+    b25 REAL, b50 REAL, b75 REAL, n_past INTEGER, pre_vol_pct REAL, created_at TEXT NOT NULL,
+    outcome REAL, loss REAL, base_loss REAL, PRIMARY KEY (event_id, symbol, window)
+);
 """
 
 

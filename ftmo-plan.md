@@ -210,7 +210,9 @@ is not approval for a paid account. Run for at least 3-6 months, then compare wi
 - [ ] Does that answer cover Futures as well as Classic?
 - [x] ~~Classic checkout price for each account size~~ See the pricing table
 - [ ] Smallest lot on US100 and US500, and its value per point
-- [ ] Israel at payout too, not only at purchase, and which payout method works there
+- [x] ~~Israel at payout, and which payout method works there~~ Israeli bank transfer works, per the owner (2026-11-01)
+- [x] ~~Can a VPS run MT5 and our software?~~ Yes, per the owner (2026-11-01)
+- [x] ~~Payout minimum and cap~~ FTMO FAQ: bank wire minimum $20 closed profit, no FTMO commission, no bank wire cap shown. Intermediary banks may charge. Instant card methods up to $20,000
 - [ ] Does "AI, software" in the forbidden list cover our own rule-based bot? Written answer
 - [ ] Exact fee for the smallest Classic 2-Step account
 - [ ] Exact spreads and overnight costs per symbol

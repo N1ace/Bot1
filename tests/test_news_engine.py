@@ -1,9 +1,9 @@
-from datetime import time
+from datetime import datetime, time, timezone
 
 import numpy as np
 import pandas as pd
 
-from news_engine import analog, events, reactions, store
+from news_engine import analog, daily, events, reactions, store
 
 
 def test_new_york_time_follows_the_clock_change():
@@ -80,3 +80,44 @@ def test_engine_stores_events_and_reactions(tmp_path):
     db = store.connect(tmp_path / "t.sqlite")
     events.save_events(db, [("FOMC-2026-10-28", "FOMC", 1, "2026-10-28T18:00:00+00:00", "test")])
     assert db.execute("SELECT type FROM events").fetchone() == ("FOMC",)
+
+
+def seeded(tmp_path):
+    db = store.connect(tmp_path / "t.sqlite")
+    for i in range(12):
+        event = f"CPI-{i}"
+        when = pd.Timestamp("2025-01-14 13:30", tz="UTC") + pd.Timedelta(days=30 * i)
+        db.execute("INSERT INTO events VALUES (?, 'CPI', 1, ?, 't')", (event, when.isoformat()))
+        db.execute("INSERT INTO reactions VALUES (?, 'US100.cash', '15m', ?, 0.5, 1.0)", (event, 0.5 + i / 100))
+    db.execute("INSERT INTO events VALUES ('CPI-next', 'CPI', 1, '2026-11-10T14:30:00+00:00', 't')")
+    db.commit()
+    return db
+
+
+def test_estimates_are_saved_only_before_the_event(tmp_path, monkeypatch):
+    monkeypatch.setattr(reactions, "SYMBOLS", ("US100.cash",))
+    monkeypatch.setattr(reactions, "WINDOWS", {"15m": 15})
+    db = seeded(tmp_path)
+    before = datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc)
+    after = datetime(2026, 11, 10, 15, 0, tzinfo=timezone.utc)
+    assert daily.predict(db, after, lambda s: 1.0) == 0
+    assert daily.predict(db, before, lambda s: 1.0) == 1
+    assert daily.predict(db, before, lambda s: 2.0) == 0  # a saved estimate never changes
+
+
+def test_events_too_far_ahead_wait(tmp_path, monkeypatch):
+    monkeypatch.setattr(reactions, "SYMBOLS", ("US100.cash",))
+    db = seeded(tmp_path)
+    assert daily.predict(db, datetime(2026, 11, 1, tzinfo=timezone.utc), lambda s: 1.0) == 0
+
+
+def test_score_fills_the_outcome_once_the_reaction_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(reactions, "SYMBOLS", ("US100.cash",))
+    monkeypatch.setattr(reactions, "WINDOWS", {"15m": 15})
+    db = seeded(tmp_path)
+    daily.predict(db, datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc), lambda s: 1.0)
+    assert daily.score(db) == 0
+    db.execute("INSERT INTO reactions VALUES ('CPI-next', 'US100.cash', '15m', -0.6, 0.8, 1.0)")
+    assert daily.score(db) == 1
+    assert daily.score(db) == 0
+    assert "Live scored events 1" in daily.scorecard(db)

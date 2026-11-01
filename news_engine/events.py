@@ -7,7 +7,7 @@ The key is read from the root .env and never printed.
 import html
 import os
 import re
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 
 import requests
@@ -78,8 +78,13 @@ def fred_events(key: str, start: str = "2021-10-01") -> list[tuple]:
             raise RuntimeError(f"FRED release {release_id} is {title!r}, expected {name}")
         dates = fred_get(FRED_DATES, {
             **params, "realtime_start": start, "include_release_dates_with_no_data": "false", "limit": 10000})
-        for row in dates["release_dates"]:
-            day = row["date"]
+        # Dates that have no data yet are the upcoming schedule
+        today = date.today().isoformat()
+        upcoming = fred_get(FRED_DATES, {**params, "realtime_start": today, "realtime_end": "9999-12-31",
+                                         "include_release_dates_with_no_data": "true", "sort_order": "desc", "limit": 24})
+        days = {row["date"] for row in dates["release_dates"]}
+        days |= {row["date"] for row in upcoming["release_dates"] if row["date"] > today}
+        for day in sorted(days):
             rows.append((f"{name}-{day}", name, tier, new_york_to_utc(day, DATA_RELEASE).isoformat(), "fred.stlouisfed.org"))
     return rows
 
