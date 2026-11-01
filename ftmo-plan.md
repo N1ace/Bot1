@@ -168,7 +168,7 @@ is not approval for a paid account. Run for at least 3-6 months, then compare wi
 - Same code as the backtest: bot and backtest levels matched at 24 sample moments.
 - Stops at the broker, -3% day and -7% total limits, flat by 15:59 New York and around FOMC, 1,000 requests a day at most.
 - A paid challenge also shows as a demo account, so the login check is what keeps the bot off one.
-- Not done: a longer demo account than the 14-day trial, and a safety review before the first order.
+- Two safety reviews done, the second with no blockers. Not done: a longer demo than the 14-day trial, and a CPI and NFP flat period.
 
 ## Build order
 
