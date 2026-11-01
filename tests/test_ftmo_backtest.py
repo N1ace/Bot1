@@ -77,3 +77,12 @@ def test_challenge_fails_at_the_bot_limits():
 
 def test_sharpe_of_flat_is_zero():
     assert sharpe(np.zeros(10)) == 0.0
+
+
+def test_layers_share_the_position_equally():
+    days = with_trend(flat_days())
+    single = fake_tactic(1)
+    layered = fake_tactic(1)
+    layered.LAYERS = (1, 2)
+    layered.layer_settings = lambda settings, layer: settings
+    assert np.allclose(run(days, layered, {}, 0.005).returns, run(days, single, {}, 0.005).returns)

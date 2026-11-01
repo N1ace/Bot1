@@ -89,6 +89,23 @@ class Result:
 
 def run(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mult: float = 1.0,
         random_seed: int | None = None) -> Result:
+    """A tactic with LAYERS splits its position equally across versions of itself.
+
+    Daily lows are averaged too. The true low of the mix can't be below that, so this errs on the cautious side.
+    """
+    layers = getattr(tactic, "LAYERS", None)
+    if layers is None:
+        return run_one(days, tactic, settings, target_daily_vol, cost_mult, random_seed)
+    parts = []
+    for i, layer in enumerate(layers):
+        seed = None if random_seed is None else random_seed * len(layers) + i
+        parts.append(run_one(days, tactic, tactic.layer_settings(settings, layer), target_daily_vol, cost_mult, seed))
+    return Result(days.dates, np.mean([r.returns for r in parts], axis=0), np.mean([r.worst for r in parts], axis=0),
+                  sum(r.trades for r in parts))
+
+
+def run_one(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mult: float = 1.0,
+            random_seed: int | None = None) -> Result:
     """Random_seed swaps the tactic's direction for a coin flip, keeping everything else."""
     rng = None if random_seed is None else np.random.default_rng(random_seed)
     levels = tactic.levels(days, settings)

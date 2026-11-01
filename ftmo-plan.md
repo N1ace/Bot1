@@ -139,7 +139,7 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 ## Lab results
 
 Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
-Full results are in `ftmo/lab_log.json`. 5 of 12 tactics used.
+Full results are in `ftmo/lab_log.json`. 6 of 12 tactics used.
 
 | Tactic | Result | Why |
 |---|---|---|
@@ -149,6 +149,7 @@ Full results are in `ftmo/lab_log.json`. 5 of 12 tactics used.
 | vwap_fade | FAIL, 2026-11-01 | Sharpe -0.97, lost in all 5 years, negative even with no costs |
 | quiet_day_breakout | FAIL, 2026-11-01 | Sharpe 1.09, but stability gap 0.88 and luck check 0.84 |
 | big_day_last_half_hour | FAIL, 2026-11-01 | Sharpe -0.17, costs took a small gross gain |
+| layered_breakout | FAIL, 2026-11-01 | Owner-approved exception. Sharpe 1.19, stability gap 0.38, luck check 0.84 |
 
 Lessons: the two good results both enter on a break during the day and hold to the close. Betting against moves lost, and
 30-minute trades left too little after costs. Stability is the shared weakness. Any new gate wording applies only to new
