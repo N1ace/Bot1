@@ -20,6 +20,11 @@ MIN_BARS_PER_DAY = 380
 
 MEASURED_SPREAD = {"US100.cash": 1.45, "US500.cash": 0.60, "XAUUSD": 0.40}  # MT5, US hours, 2026
 COMMISSION_PER_SIDE = {"XAUUSD": 0.000007}  # 0.0007% of the trade, from MT5. Indices have none
+SPREAD_FLOOR_SHARE = {"GER40.cash": 0.000048}  # as a share of price, so older, cheaper years aren't overcharged
+
+# Local zone, first minute of the grid, grid length, and bars needed for a full day. US markets use the default
+SESSIONS = {"GER40.cash": ("Europe/Berlin", 60, 720, 650)}
+US_SESSION = ("America/New_York", 9 * 60 + 30, SESSION_MINUTES, MIN_BARS_PER_DAY)
 SLIPPAGE_SHARE = 0.25  # each fill also loses a quarter of the spread
 
 DAY_STOP = -0.03  # the bot's own limits, inside FTMO's 5% and 10%
@@ -51,21 +56,25 @@ def load_days(symbol: str, include_holdout: bool = False) -> Days:
 
 def build_days(bars: pd.DataFrame, symbol: str, keep_today: bool = False) -> Days:
     """Shape bars into sessions. The live bot uses this too, with keep_today for the unfinished session."""
-    ny = bars["time"] - pd.Timedelta(hours=SERVER_HOURS_AHEAD_OF_NY)
-    minute = (ny.dt.hour * 60 + ny.dt.minute) - (9 * 60 + 30)
-    keep = (minute >= 0) & (minute < SESSION_MINUTES)
-    bars = bars[keep].assign(day=ny[keep].dt.floor("D"), minute=minute[keep])
+    zone, first_minute, grid_minutes, needed_bars = SESSIONS.get(symbol, US_SESSION)
+    local = bars["time"] - pd.Timedelta(hours=SERVER_HOURS_AHEAD_OF_NY)
+    if zone != US_SESSION[0]:
+        local = (local.dt.tz_localize(US_SESSION[0], ambiguous="NaT", nonexistent="NaT")
+                 .dt.tz_convert(zone).dt.tz_localize(None))
+    minute = (local.dt.hour * 60 + local.dt.minute) - first_minute
+    keep = (minute >= 0) & (minute < grid_minutes) & local.notna()
+    bars = bars[keep].assign(day=local[keep].dt.floor("D"), minute=minute[keep])
 
     tables = {}
     for column in ("open", "high", "low", "close", "tick_volume", "spread"):
-        tables[column] = bars.pivot(index="day", columns="minute", values=column).reindex(columns=range(SESSION_MINUTES))
-    complete = tables["close"].notna().sum(axis=1) >= MIN_BARS_PER_DAY
+        tables[column] = bars.pivot(index="day", columns="minute", values=column).reindex(columns=range(grid_minutes))
+    complete = tables["close"].notna().sum(axis=1) >= needed_bars
     if keep_today:
         complete.iloc[-1] = True
     for column, table in tables.items():
         table = table[complete].ffill(axis=1).bfill(axis=1)
         tables[column] = table.to_numpy(dtype=float)
-    floor = MEASURED_SPREAD[symbol]
+    floor = MEASURED_SPREAD.get(symbol, 0.0) + SPREAD_FLOOR_SHARE.get(symbol, 0.0) * tables["close"]
     return Days(
         dates=pd.DatetimeIndex(complete[complete].index),
         open=tables["open"], high=tables["high"], low=tables["low"], close=tables["close"],
@@ -103,6 +112,8 @@ def run(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mult: 
 
     Daily lows are averaged too. The true low of the mix can't be below that, so this errs on the cautious side.
     """
+    if hasattr(tactic, "simulate"):
+        return tactic.simulate(days, settings, target_daily_vol, cost_mult, random_seed)
     layers = getattr(tactic, "LAYERS", None)
     if layers is None:
         return run_one(days, tactic, settings, target_daily_vol, cost_mult, random_seed)

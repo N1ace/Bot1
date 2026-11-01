@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from ftmo.backtest import Days, challenge_once, run, sharpe
+from ftmo.backtest import Days, challenge_once, position_sizes, run, sharpe
+from ftmo.tactics import dax_overnight_range as dax
 
 
 def flat_days(n=30, price=100.0):
@@ -93,3 +94,39 @@ def test_commission_is_charged_on_both_sides():
     free = run(days, fake_tactic(1), {}, 0.005).returns
     days.commission = 0.001
     assert (run(days, fake_tactic(1), {}, 0.005).returns[free != 0] < free[free != 0]).all()
+
+
+def range_days(path):
+    """One flat market around 100 with a 99-101 overnight range, then the chosen path after the open."""
+    n, minutes, opened = 30, 720, 480
+    prices = np.full((n, minutes), 100.0)
+    highs, lows = prices.copy(), prices.copy()
+    highs[:, 120:opened], lows[:, 120:opened] = 101.0, 99.0
+    days = Days(pd.date_range("2024-01-01", periods=n), prices.copy(), highs, lows, prices.copy(), np.ones((n, minutes)),
+                np.full((n, minutes), 0.01))
+    days.close[:, -1] += np.resize([1.0, -1.0], n)
+    for minute, (o, h, low, c) in path.items():
+        days.open[20, minute], days.high[20, minute], days.low[20, minute], days.close[20, minute] = o, h, low, c
+    return days
+
+
+def test_breakout_hits_its_target_for_about_twice_the_risk():
+    days = range_days({490: (101, 101, 101, 101), 500: (105, 105, 105, 105)})
+    r = dax.simulate(days, dax.SETTINGS, 0.02)
+    risk_share = 2 / 101 * position_sizes(days, 0.02, 4.0)[20]
+    assert np.isclose(r.returns[20], 2 * risk_share, rtol=0.05)
+
+
+def test_breakout_stop_wins_when_stop_and_target_share_a_bar():
+    days = range_days({490: (101, 101, 101, 101), 500: (100, 105, 98, 100)})
+    assert dax.simulate(days, dax.SETTINGS, 0.02).returns[20] < 0
+
+
+def test_a_bar_touching_both_sides_skips_the_day():
+    days = range_days({490: (100, 102, 98, 100)})
+    assert dax.simulate(days, dax.SETTINGS, 0.02).returns[20] == 0
+
+
+def test_range_uses_only_bars_before_the_open():
+    days = range_days({490: (101, 300, 101, 101)})
+    assert dax.levels(days, dax.SETTINGS).high[20] == 101

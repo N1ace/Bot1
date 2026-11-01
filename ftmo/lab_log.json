@@ -418,5 +418,64 @@
         }
       }
     }
+  },
+  {
+    "when": "2026-11-01T09:28:52+00:00",
+    "kind": "test",
+    "name": "dax_overnight_range",
+    "fingerprint": "04f6ccf9f21ae862",
+    "result": {
+      "measured": {
+        "trades": 804,
+        "sharpe": 0.758,
+        "double_cost_sharpe": 0.462,
+        "stability_gap": 0.236,
+        "good_years": 1.0,
+        "deflated_sharpe": 0.461,
+        "random_percentile": 87.0
+      },
+      "passed": {
+        "trades": true,
+        "sharpe": false,
+        "double_cost_sharpe": true,
+        "stability_gap": true,
+        "good_years": true,
+        "deflated_sharpe": false,
+        "random_percentile": false
+      },
+      "all_passed": false,
+      "total_return_pct": 9.64,
+      "max_drawdown_pct": -4.61,
+      "worst_day_pct": -1.12,
+      "active_days": 804,
+      "years_pct": {
+        "2022": 1.42,
+        "2023": 1.04,
+        "2024": 5.98,
+        "2025": 0.97
+      },
+      "random_sharpe_median": 0.184,
+      "us500_sharpe_info_only": null,
+      "challenge_odds": {
+        "0.5%_daily_vol": {
+          "pass": 0.2625,
+          "fail": 0.063,
+          "unfinished": 0.6745,
+          "median_days_to_pass": 569.0
+        },
+        "1.0%_daily_vol": {
+          "pass": 0.5855,
+          "fail": 0.3395,
+          "unfinished": 0.075,
+          "median_days_to_pass": 330.0
+        },
+        "2.0%_daily_vol": {
+          "pass": 0.4415,
+          "fail": 0.5585,
+          "unfinished": 0.0,
+          "median_days_to_pass": 107.0
+        }
+      }
+    }
   }
 ]

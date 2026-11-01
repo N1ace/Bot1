@@ -139,7 +139,7 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 ## Lab results
 
 Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
-Full results are in `ftmo/lab_log.json`. 7 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
+Full results are in `ftmo/lab_log.json`. 8 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
 all. New tactics should set it as a percentage. That applies to new tests only.
 
 | Tactic | Result | Why |
@@ -151,6 +151,7 @@ all. New tactics should set it as a percentage. That applies to new tests only.
 | big_day_last_half_hour | FAIL, 2026-11-01 | Sharpe -0.17, costs took a small gross gain |
 | layered_breakout | FAIL, 2026-11-01 | Owner-approved exception. Sharpe 1.19, stability gap 0.38, luck check 0.84 |
 | noise_area_gold | FAIL, 2026-11-01 | noise_area unchanged on XAUUSD. Sharpe -0.67, lost in all 5 years, beat random 99% |
+| dax_overnight_range | FAIL, 2026-11-01 | Sharpe 0.76, luck check 0.46, beat only 87% of random. Stable, and all 4 years positive. GER40 commission assumed zero, not read from MT5 |
 
 Lessons: the two good results both enter on a break during the day and hold to the close. Betting against moves lost, and
 30-minute trades left too little after costs. Stability is the shared weakness. Any new gate wording applies only to new
@@ -231,3 +232,9 @@ is not approval for a paid account. Run for at least 3-6 months, then compare wi
 
 The drawdown is trailing and equity must stay above it at all times. FTMO's own commission is reported at
 $0.50 per side on minis and $0.20 on micros, plus exchange fees. FTMO's FAQ reports 30 instruments.
+
+## News engine
+
+`news_engine/` follows `news-analog-engine-spec.md`, independent of the bot. First stage: free data, move size only, US100,
+US500 and GER40. FOMC is scored. CPI and NFP need a free FRED key in the root `.env`, as `FRED_API_KEY=`. Paid consensus
+data waits until this stage proves useful. Reports use size, never direction, so the lab's hidden period stays unused.

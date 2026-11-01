@@ -94,7 +94,8 @@ def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
         years[int(year)] = round(float(np.prod(1 + picked) - 1) * 100, 2)
 
     randoms = [sharpe(run(days, tactic, tactic.SETTINGS, TEST_VOL, random_seed=i).returns) for i in range(RANDOM_RUNS)]
-    other = run(load_days("US500.cash", include_holdout), tactic, tactic.SETTINGS, TEST_VOL)
+    info_symbol = getattr(tactic, "INFO_SYMBOL", "US500.cash")
+    other = run(load_days(info_symbol, include_holdout), tactic, tactic.SETTINGS, TEST_VOL) if info_symbol else None
 
     measured = {
         "trades": base.trades, "sharpe": s,
@@ -113,7 +114,7 @@ def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
         "worst_day_pct": round(float(base.worst.min()) * 100, 2),
         "active_days": int((base.returns != 0).sum()), "years_pct": years,
         "random_sharpe_median": round(float(np.median(randoms)), 3),
-        "us500_sharpe_info_only": round(sharpe(other.returns), 3),
+        "us500_sharpe_info_only": round(sharpe(other.returns), 3) if other else None,
         "challenge_odds": {f"{v:.1%}_daily_vol": challenge_odds(run(days, tactic, tactic.SETTINGS, v)) for v in CHALLENGE_VOLS},
     }
 
