@@ -139,13 +139,22 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 ## Lab results
 
 Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
-Full results are in `ftmo/lab_log.json`. 1 of 12 tactics used.
+Full results are in `ftmo/lab_log.json`. 5 of 12 tactics used.
 
 | Tactic | Result | Why |
 |---|---|---|
 | noise_area | FAIL, 2026-11-01 | 6 of 7 gates passed, Sharpe 1.48. Failed stability: a 20% settings change moved Sharpe by 0.52, limit 0.25 |
 
-The failure stands. No lowering the gate, and no small variations under a new name.
+| first_half_hour | FAIL, 2026-11-01 | Sharpe -1.39, lost in all 5 years, no better than random direction |
+| vwap_fade | FAIL, 2026-11-01 | Sharpe -0.97, lost in all 5 years, negative even with no costs |
+| quiet_day_breakout | FAIL, 2026-11-01 | Sharpe 1.09, but stability gap 0.88 and luck check 0.84 |
+| big_day_last_half_hour | FAIL, 2026-11-01 | Sharpe -0.17, costs took a small gross gain |
+
+Lessons: the two good results both enter on a break during the day and hold to the close. Betting against moves lost, and
+30-minute trades left too little after costs. Stability is the shared weakness. Any new gate wording applies only to new
+tactics and can't rescue a failed one.
+
+Failures stand. No lowering a gate, and no small variations under a new name.
 
 ## Build order
 

@@ -57,18 +57,23 @@ def deflated_sharpe(returns: np.ndarray, trials: int) -> float:
 
 
 def look_ahead_check(days, tactic) -> bool:
-    """Levels for a day and minute must not change when the future is removed or altered."""
+    """At every decision minute, levels must not change when anything later is altered."""
     full = tactic.levels(days, tactic.SETTINGS)
-    d, m = len(days.dates) - 50, 200
-    altered = type(days)(days.dates, days.open.copy(), days.high.copy(), days.low.copy(), days.close.copy(),
-                         days.ticks.copy(), days.spread.copy())
-    for table in (altered.open, altered.high, altered.low, altered.close, altered.ticks):
-        table[d, m + 1:] *= 1.5
-        table[d + 1:] *= 1.5
-    changed = tactic.levels(altered, tactic.SETTINGS)
-    same = (np.isclose(full.upper[d, m], changed.upper[d, m]) and np.isclose(full.lower[d, m], changed.lower[d, m])
-            and np.isclose(full.vwap[d, m], changed.vwap[d, m]))
-    return bool(same)
+    d = len(days.dates) - 50
+    for check in tactic.CHECK_MINUTES:
+        m = check - 1
+        altered = type(days)(days.dates, days.open.copy(), days.high.copy(), days.low.copy(), days.close.copy(),
+                             days.ticks.copy(), days.spread.copy())
+        for table in (altered.open, altered.high, altered.low, altered.close, altered.ticks):
+            table[d, m + 1:] *= 1.5
+            table[d + 1:] *= 1.5
+        changed = tactic.levels(altered, tactic.SETTINGS)
+        for key, values in vars(full).items():
+            now, later = values[d, m] if values.ndim == 2 else values[d], getattr(changed, key)
+            later = later[d, m] if later.ndim == 2 else later[d]
+            if not np.isclose(float(now), float(later), equal_nan=True):
+                return False
+    return True
 
 
 def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
