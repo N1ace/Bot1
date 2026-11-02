@@ -1,0 +1,234 @@
+{
+  "when": "2026-11-01T18:08:02+00:00",
+  "trials_counted": 21,
+  "rows": [
+    {
+      "activate": 0.0,
+      "offset": 0.0,
+      "sharpe": 1.381,
+      "double_cost": 0.8,
+      "stability_gap": 0.598,
+      "worst_setting": 0.783,
+      "return_pct": 14.6,
+      "max_drawdown_pct": -2.59,
+      "trades": 1009,
+      "luck_check": 0.748,
+      "us500_sharpe": 0.677,
+      "odds_1pct": {
+        "pass": 0.884,
+        "fail": 0.044,
+        "unfinished": 0.072,
+        "median_days_to_pass": 398.0
+      }
+    },
+    {
+      "activate": 0.0,
+      "offset": 0.5,
+      "sharpe": 1.421,
+      "double_cost": 1.021,
+      "stability_gap": 0.437,
+      "worst_setting": 0.984,
+      "return_pct": 16.68,
+      "max_drawdown_pct": -2.46,
+      "trades": 763,
+      "luck_check": 0.777,
+      "us500_sharpe": 0.895,
+      "odds_1pct": {
+        "pass": 0.922,
+        "fail": 0.026,
+        "unfinished": 0.052,
+        "median_days_to_pass": 355.0
+      }
+    },
+    {
+      "activate": 0.0,
+      "offset": 1.0,
+      "sharpe": 1.461,
+      "double_cost": 1.075,
+      "stability_gap": 0.533,
+      "worst_setting": 0.928,
+      "return_pct": 17.47,
+      "max_drawdown_pct": -2.74,
+      "trades": 747,
+      "luck_check": 0.801,
+      "us500_sharpe": 0.796,
+      "odds_1pct": {
+        "pass": 0.932,
+        "fail": 0.024,
+        "unfinished": 0.044,
+        "median_days_to_pass": 345.0
+      }
+    },
+    {
+      "activate": 0.5,
+      "offset": 0.0,
+      "sharpe": 1.444,
+      "double_cost": 1.043,
+      "stability_gap": 0.514,
+      "worst_setting": 0.931,
+      "return_pct": 17.0,
+      "max_drawdown_pct": -2.68,
+      "trades": 765,
+      "luck_check": 0.792,
+      "us500_sharpe": 0.803,
+      "odds_1pct": {
+        "pass": 0.926,
+        "fail": 0.024,
+        "unfinished": 0.05,
+        "median_days_to_pass": 347.0
+      }
+    },
+    {
+      "activate": 0.5,
+      "offset": 0.5,
+      "sharpe": 1.5,
+      "double_cost": 1.11,
+      "stability_gap": 0.488,
+      "worst_setting": 1.012,
+      "return_pct": 17.76,
+      "max_drawdown_pct": -2.68,
+      "trades": 747,
+      "luck_check": 0.823,
+      "us500_sharpe": 0.83,
+      "odds_1pct": {
+        "pass": 0.934,
+        "fail": 0.024,
+        "unfinished": 0.042,
+        "median_days_to_pass": 339.0
+      }
+    },
+    {
+      "activate": 0.5,
+      "offset": 1.0,
+      "sharpe": 1.523,
+      "double_cost": 1.135,
+      "stability_gap": 0.523,
+      "worst_setting": 1.0,
+      "return_pct": 18.1,
+      "max_drawdown_pct": -2.68,
+      "trades": 745,
+      "luck_check": 0.835,
+      "us500_sharpe": 0.812,
+      "odds_1pct": {
+        "pass": 0.932,
+        "fail": 0.028,
+        "unfinished": 0.04,
+        "median_days_to_pass": 328.0
+      }
+    },
+    {
+      "activate": 1.0,
+      "offset": 0.0,
+      "sharpe": 1.485,
+      "double_cost": 1.096,
+      "stability_gap": 0.529,
+      "worst_setting": 0.956,
+      "return_pct": 17.57,
+      "max_drawdown_pct": -2.68,
+      "trades": 745,
+      "luck_check": 0.815,
+      "us500_sharpe": 0.82,
+      "odds_1pct": {
+        "pass": 0.93,
+        "fail": 0.028,
+        "unfinished": 0.042,
+        "median_days_to_pass": 340.0
+      }
+    },
+    {
+      "activate": 1.0,
+      "offset": 0.5,
+      "sharpe": 1.472,
+      "double_cost": 1.083,
+      "stability_gap": 0.515,
+      "worst_setting": 0.956,
+      "return_pct": 17.41,
+      "max_drawdown_pct": -2.68,
+      "trades": 745,
+      "luck_check": 0.808,
+      "us500_sharpe": 0.803,
+      "odds_1pct": {
+        "pass": 0.928,
+        "fail": 0.028,
+        "unfinished": 0.044,
+        "median_days_to_pass": 341.5
+      }
+    },
+    {
+      "activate": 1.0,
+      "offset": 1.0,
+      "sharpe": 1.517,
+      "double_cost": 1.13,
+      "stability_gap": 0.561,
+      "worst_setting": 0.956,
+      "return_pct": 18.02,
+      "max_drawdown_pct": -2.68,
+      "trades": 744,
+      "luck_check": 0.832,
+      "us500_sharpe": 0.797,
+      "odds_1pct": {
+        "pass": 0.932,
+        "fail": 0.028,
+        "unfinished": 0.04,
+        "median_days_to_pass": 330.0
+      }
+    },
+    {
+      "activate": 2.0,
+      "offset": 0.0,
+      "sharpe": 1.476,
+      "double_cost": 1.088,
+      "stability_gap": 0.519,
+      "worst_setting": 0.956,
+      "return_pct": 17.46,
+      "max_drawdown_pct": -2.68,
+      "trades": 744,
+      "luck_check": 0.81,
+      "us500_sharpe": 0.797,
+      "odds_1pct": {
+        "pass": 0.928,
+        "fail": 0.028,
+        "unfinished": 0.044,
+        "median_days_to_pass": 341.0
+      }
+    },
+    {
+      "activate": 2.0,
+      "offset": 0.5,
+      "sharpe": 1.476,
+      "double_cost": 1.088,
+      "stability_gap": 0.519,
+      "worst_setting": 0.956,
+      "return_pct": 17.46,
+      "max_drawdown_pct": -2.68,
+      "trades": 744,
+      "luck_check": 0.81,
+      "us500_sharpe": 0.797,
+      "odds_1pct": {
+        "pass": 0.928,
+        "fail": 0.028,
+        "unfinished": 0.044,
+        "median_days_to_pass": 341.0
+      }
+    },
+    {
+      "activate": 2.0,
+      "offset": 1.0,
+      "sharpe": 1.476,
+      "double_cost": 1.088,
+      "stability_gap": 0.519,
+      "worst_setting": 0.956,
+      "return_pct": 17.46,
+      "max_drawdown_pct": -2.68,
+      "trades": 744,
+      "luck_check": 0.81,
+      "us500_sharpe": 0.797,
+      "odds_1pct": {
+        "pass": 0.928,
+        "fail": 0.028,
+        "unfinished": 0.044,
+        "median_days_to_pass": 341.0
+      }
+    }
+  ]
+}

@@ -21,6 +21,21 @@ CREATE TABLE IF NOT EXISTS reactions (
     event_id TEXT NOT NULL REFERENCES events(id), symbol TEXT NOT NULL, window TEXT NOT NULL, return_pct REAL NOT NULL,
     range_pct REAL NOT NULL, pre_vol_pct REAL, PRIMARY KEY (event_id, symbol, window)
 );
+CREATE TABLE IF NOT EXISTS news_items (
+    id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, published_utc TEXT, fetched_utc TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS news_labels (
+    news_id TEXT PRIMARY KEY, category TEXT NOT NULL, importance TEXT NOT NULL, model TEXT NOT NULL, created_utc TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ai_summaries (day TEXT PRIMARY KEY, summary TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS llm_log (
+    created_utc TEXT NOT NULL, model TEXT NOT NULL, prompt TEXT NOT NULL, response TEXT NOT NULL, input_tokens INTEGER,
+    output_tokens INTEGER, cost_usd REAL
+);
+CREATE TABLE IF NOT EXISTS regime (day TEXT PRIMARY KEY, label TEXT NOT NULL, risk_budget_mult REAL NOT NULL, details_json TEXT);
+CREATE TABLE IF NOT EXISTS blackouts (
+    event_id TEXT NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, firm TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS predictions (
     event_id TEXT NOT NULL, symbol TEXT NOT NULL, window TEXT NOT NULL, q25 REAL, q50 REAL, q75 REAL,
     b25 REAL, b50 REAL, b75 REAL, n_past INTEGER, pre_vol_pct REAL, created_at TEXT NOT NULL,

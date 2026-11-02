@@ -2,6 +2,7 @@ from collections import namedtuple
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -85,6 +86,7 @@ def signal(monkeypatch, target, hard_stop=0.01):
     """Replace the market read with a chosen decision."""
     today = 0
     days = SimpleNamespace(dates=[1], close=pd.DataFrame([[28_000.0] * 390]).to_numpy())
+    monkeypatch.setattr(bot, "volatility_spike", lambda *_: False)
     monkeypatch.setattr(bot.Bot, "read_days", lambda self, d, m: days)
     monkeypatch.setattr(bot.tactic, "levels", lambda d, s: SimpleNamespace(ready=[True], hard_stop=[hard_stop]))
     monkeypatch.setattr(bot.tactic, "decide", lambda *_: target)
@@ -391,3 +393,85 @@ def test_symbol_hours():
     assert bot.symbol_is_trading(datetime(2026, 11, 2, 12, 0))
     assert not bot.symbol_is_trading(datetime(2026, 11, 2, 23, 55))
     assert not bot.symbol_is_trading(datetime(2026, 11, 7, 12, 0))
+
+
+def test_wide_spread_skips_the_entry(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    monkeypatch.setattr(bot, "volatility_spike", lambda *_: False)
+    fake.symbol_info_tick = lambda _: SimpleNamespace(time=int(SERVER_EPOCH), bid=28_000.0, ask=28_010.0)
+    make_bot(tmp_path).step()
+    assert fake.orders == []
+
+
+def test_wide_spread_never_blocks_a_close(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    fake.symbol_info_tick = lambda _: SimpleNamespace(time=int(SERVER_EPOCH), bid=28_000.0, ask=28_010.0)
+    fake.open_positions = [position(1, sl=0)]
+    make_bot(tmp_path).step()
+    assert len(fake.orders) == 1
+
+
+def test_volatility_spike_needs_an_unusual_range():
+    shape = (30, 390)
+    high, low = np.full(shape, 101.0), np.full(shape, 100.0)
+    days = SimpleNamespace(high=high, low=low)
+    assert not bot.volatility_spike(days, 29, 100)
+    high[29, 97] = 110.0
+    assert bot.volatility_spike(days, 29, 100)
+    high[29, 97] = 101.0
+    high[29, 100] = 110.0  # the bar still forming is ignored
+    assert not bot.volatility_spike(days, 29, 100)
+
+
+def test_volatility_spike_blocks_the_entry_and_uses_up_the_check(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    monkeypatch.setattr(bot, "volatility_spike", lambda *_: True)
+    b = make_bot(tmp_path)
+    b.step()
+    b.step()
+    assert fake.orders == [] and b.state.last_check == "2026-11-02 30"
+
+
+def test_volatility_spike_never_blocks_a_reversal_close(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, -1)
+    monkeypatch.setattr(bot, "volatility_spike", lambda *_: True)
+    fake.open_positions = [position(1)]
+    b = make_bot(tmp_path)
+    b.step()
+    assert len(fake.orders) == 1 and fake.orders[0]["position"] == 7
+    fake.open_positions = []
+    b.step()
+    assert len(fake.orders) == 1 and not b.pending_exit
+
+
+def test_wide_spread_never_blocks_a_tactic_exit(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 0)
+    fake.symbol_info_tick = lambda _: SimpleNamespace(time=int(SERVER_EPOCH), bid=28_000.0, ask=28_010.0)
+    fake.open_positions = [position(1)]
+    make_bot(tmp_path).step()
+    assert len(fake.orders) == 1
+
+
+def test_journal_failure_does_not_stop_a_close(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    fake.open_positions = [position(1, sl=0)]
+    b = make_bot(tmp_path)
+    b.journal_path = tmp_path / "missing" / "journal.jsonl"
+    b.step()
+    assert len(fake.orders) == 1
+
+
+def test_dry_run_with_a_position_sends_nothing_and_sets_no_exit(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 0)
+    fake.order_send = lambda _: pytest.fail("order_send was called in a dry run")
+    fake.open_positions = [position(1)]
+    b = make_bot(tmp_path, place_orders=False)
+    b.step()
+    assert not b.pending_exit
+
+
+def test_unknown_limits_block_entries(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    fake.history_deals_get = lambda *_: None
+    make_bot(tmp_path).step()
+    assert fake.orders == []

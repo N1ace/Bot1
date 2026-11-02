@@ -11,11 +11,12 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
-from news_engine import analog, events, reactions, store
+from news_engine import ai, analog, briefing, events, news, reactions, regime, store, telegram
 
 HORIZON_HOURS = 48
 HISTORY_BARS = 30_000
 LOG_PATH = store.DB_PATH.with_name("news_engine.log")
+SENT_PATH = store.DB_PATH.with_name("news_sent.txt")
 
 
 def update_prices() -> bool:
@@ -99,6 +100,17 @@ def scorecard(db) -> str:
     return f"Live scored events {events_done}, gate 40. Average loss {loss:.3f}, baseline {base:.3f}."
 
 
+def send_once(text: str, now: datetime) -> str:
+    """One briefing a day, however many times the PC restarts."""
+    today = f"{now:%Y-%m-%d}"
+    if SENT_PATH.exists() and SENT_PATH.read_text(encoding="utf-8").strip() == today:
+        return "already sent today"
+    status = telegram.send(text)
+    if status == "sent":
+        SENT_PATH.write_text(today, encoding="utf-8")
+    return status
+
+
 def main() -> None:
     db = store.connect()
     now = datetime.now(timezone.utc)
@@ -109,10 +121,17 @@ def main() -> None:
         rows += events.fred_events(key)
     events.save_events(db, rows)
     reactions.record_all(db)
+    fresh, failed = news.fetch_news(db)
+    ai_status = ai.review(db, now)
+    conditions = regime.update(db, now)
     bars = {s: reactions.load_bars(s) for s in reactions.SYMBOLS}
     saved = predict(db, now, lambda s: reactions.pre_volatility(bars[s], pd.Timestamp(now)))
+    briefing.write_blackouts(db, now)
     line = (f"{now:%Y-%m-%d %H:%M} UTC, MT5 prices {'updated' if prices else 'NOT updated'}, {saved} estimates saved, "
-            f"{score(db)} scored. {scorecard(db)}")
+            f"{score(db)} scored, {fresh} headlines, feeds failed {failed or 'none'}, AI: {ai_status}, regime: {conditions}. {scorecard(db)}")
+    text = briefing.make_briefing(db, now)
+    briefing.BRIEFING_PATH.write_text(text, encoding="utf-8")
+    line += f" Telegram: {send_once(text, now)}."
     print(line, flush=True)
     with LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(line + "\n")

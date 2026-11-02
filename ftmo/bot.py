@@ -22,6 +22,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import MetaTrader5 as mt5
+import numpy as np
 import pandas as pd
 
 from ftmo import backtest
@@ -35,6 +36,10 @@ POLL_SECONDS = 20
 MAX_DEVIATION_POINTS = 500  # 5 index points, so a close isn't refused in a fast market
 STALE_SECONDS = 120  # no price for this long means the feed, or the clock, can't be trusted
 MIN_STOP_SPREADS = 2  # refuse an entry whose stop would sit this close to the price
+MAX_SPREAD = 2 * backtest.MEASURED_SPREAD[SYMBOL]  # news or thin markets: skip the entry, exits are never blocked
+SPIKE_MINUTES = 5
+SPIKE_MULTIPLE = 3.0  # skip an entry if the last 5 minutes ran this many times their usual range
+SPIKE_DAYS = 20
 
 # FTMO's limit is 2,000 server requests a day. Entries stop first, so closes always have some left
 ENTRY_REQUEST_LIMIT = 800
@@ -134,6 +139,16 @@ def symbol_is_trading(server_now: datetime) -> bool:
     return server_now.weekday() < 5 and 65 <= minutes < 23 * 60 + 50
 
 
+def volatility_spike(days, today: int, minute: int) -> bool:
+    """Compare the last few closed minutes with the same minutes on earlier days."""
+    start = max(0, minute - SPIKE_MINUTES)
+    first = max(0, today - SPIKE_DAYS)
+    if today == first:
+        return False
+    ranges = days.high[:, start:minute].max(axis=1) - days.low[:, start:minute].min(axis=1)
+    return bool(ranges[today] > SPIKE_MULTIPLE * np.median(ranges[first:today]))
+
+
 def lots_for(size: float, equity: float, price: float, step: float, smallest: float, largest: float) -> float:
     """Whole lot steps, rounded down. Zero if the trade would be below the smallest lot."""
     steps = math.floor(size * equity / price / step + 1e-9)
@@ -177,12 +192,12 @@ class Bot:
 
     def journal(self, event: str, **details) -> None:
         row = {"utc": utc_now().isoformat(timespec="seconds"), "event": event, **details}
-        print(row, flush=True)
-        try:
+        try:  # a full or locked disk mustn't stop a close
+            print(row, flush=True)
             with self.journal_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, default=str) + "\n")
-        except OSError as e:  # a full or locked disk mustn't stop a close
-            print("Journal write failed:", repr(e), flush=True)
+        except (OSError, ValueError):
+            pass
 
     def alert(self, event: str, **details) -> None:
         """Journal a repeating problem once, until it changes."""
@@ -249,6 +264,9 @@ class Bot:
         if tick is None:
             self.journal("entry_skipped", reason="no price")
             return
+        if tick.ask - tick.bid > MAX_SPREAD:
+            self.journal("entry_skipped", reason="spread too wide", bid=tick.bid, ask=tick.ask)
+            return
         price = tick.ask if direction > 0 else tick.bid
         lots = lots_for(size, account.equity, price, self.info.volume_step, self.info.volume_min, self.info.volume_max)
         if lots == 0:
@@ -305,7 +323,9 @@ class Bot:
                 self.pending_exit = True
                 return
         self.state.last_check = key
-        if target != 0 and target != current and day not in NO_TRADE_DAYS:
+        if target != 0 and target != current and volatility_spike(days, today, minute):
+            self.journal("entry_skipped", reason="volatility spike", minute=minute)
+        elif target != 0 and target != current and day not in NO_TRADE_DAYS:
             self.open(target, float(sizes[today]), float(levels.hard_stop[today]), account)
 
     def record_deals(self, server_now: datetime) -> None:
@@ -410,10 +430,7 @@ class Bot:
                 try:
                     self.step()
                 except Exception as e:  # one bad poll mustn't end the bot and strand a position
-                    try:
-                        self.journal("step_error", error=repr(e))
-                    except OSError:
-                        print("step_error, and the journal can't be written:", repr(e), flush=True)
+                    self.journal("step_error", error=repr(e))
                 if once:
                     return
                 time.sleep(POLL_SECONDS)

@@ -160,6 +160,8 @@ tactics and can't rescue a failed one.
 
 Failures stand. No lowering a gate, and no small variations under a new name.
 
+Stop exploration outside the lab, at the owner's request (`ftmo/explore_log.json`): 12 variants, visible data only. Tightening a trade that was still in a loss did the damage. Tightening only after profit changed almost nothing: best Sharpe 1.52 against 1.48, stability still failed in all 12. No variant counts as a pass.
+
 ## What the tactics report changed (owner's report, 2026-11-01)
 
 Secondary and vendor sources are mixed in. Treat every published backtest as an upper bound.
@@ -239,5 +241,5 @@ $0.50 per side on minis and $0.20 on micros, plus exchange fees. FTMO's FAQ repo
 ## News engine
 
 `news_engine/` follows `news-analog-engine-spec.md`, independent of the bot. First stage: free data, move size only, US100,
-US500 and GER40. FOMC is scored. CPI and NFP need a free FRED key in the root `.env`, as `FRED_API_KEY=`. Paid consensus
+US500 and GER40. CPI, NFP, FOMC, PPI, PCE, retail sales and GDP are stored, with the key in the root `.env`. Paid consensus
 data waits until this stage proves useful. Reports use size, never direction, so the lab's hidden period stays unused.

@@ -154,3 +154,16 @@ def test_a_stop_past_the_next_open_is_ignored():
     days.low[d, 100] = 98.0
     held = run(days, fake_tactic(1, stop=0.5), {}, 0.005).returns[d]
     assert run(days, trailing_tactic(150.0), {}, 0.005).returns[d] == held
+
+
+def test_manage_can_leave_the_stop_alone():
+    days = with_trend(flat_days())
+    d = 20
+    days.low[d, 100] = 98.0
+    plain = run(days, fake_tactic(1, stop=0.5), {}, 0.005).returns[d]
+    idle = fake_tactic(1, stop=0.5)
+    idle.manage = lambda *_: None
+    active = fake_tactic(1, stop=0.5)
+    active.manage = lambda *_: 99.0
+    assert run(days, idle, {}, 0.005).returns[d] == plain
+    assert run(days, active, {}, 0.005).returns[d] < plain

@@ -27,7 +27,11 @@ STATEMENT = time(14, 0)
 DATA_RELEASE = time(8, 30)
 
 # FRED release ID, the words its name must contain, and tier. The name check catches a wrong ID
-FRED_RELEASES = {"CPI": (10, "consumer price index", 1), "NFP": (50, "employment situation", 1)}
+FRED_RELEASES = {
+    "CPI": (10, "consumer price index", 1), "NFP": (50, "employment situation", 1),
+    "PPI": (46, "producer price index", 2), "PCE": (54, "personal income and outlays", 2),
+    "RETAIL": (9, "advance monthly sales", 2), "GDP": (53, "gross domestic product", 2),
+}
 
 
 def parse_fomc(page: str) -> list[tuple[str, str]]:

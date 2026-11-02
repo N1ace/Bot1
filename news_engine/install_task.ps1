@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File news_engine\install_task.ps1           # install / update
 #   powershell -ExecutionPolicy Bypass -File news_engine\install_task.ps1 -Remove   # uninstall
 #
-# Runs as you, only while you are logged in. If the PC was off, it runs as soon as possible after.
+# Runs as you, daily and 5 minutes after each login. If the PC was off, it runs as soon as possible after.
 
 param([switch]$Remove, [string]$Time = "09:00")
 
@@ -19,10 +19,13 @@ if ($Remove) {
 if (-not (Test-Path $Python)) { throw "Python venv not found at $Python" }
 
 $action = New-ScheduledTaskAction -Execute $Python -Argument "-m news_engine.daily" -WorkingDirectory $Repo
-$trigger = New-ScheduledTaskTrigger -Daily -At $Time
+$daily = New-ScheduledTaskTrigger -Daily -At $Time
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$login = New-ScheduledTaskTrigger -AtLogOn -User $user
+$login.Delay = "PT5M"  # gives MT5 time to log in
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($daily, $login) -Settings $settings `
     -Description "News engine: save event estimates and score them (no orders)" -Force | Out-Null
 
 $info = Get-ScheduledTaskInfo -TaskName $TaskName
