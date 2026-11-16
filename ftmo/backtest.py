@@ -46,17 +46,18 @@ class Days:
     commission: float = 0.0
 
 
-def load_days(symbol: str, include_holdout: bool = False) -> Days:
+def load_days(symbol: str, include_holdout: bool = False, session: tuple | None = None) -> Days:
     bars = pd.read_pickle(DATA_DIR / f"{symbol}_M1.pkl")
     bars = bars[bars["time"] >= FIRST_DAY]
     if not include_holdout:
         bars = bars[bars["time"] < HOLDOUT_START]
-    return build_days(bars, symbol)
+    return build_days(bars, symbol, session=session)
 
 
-def build_days(bars: pd.DataFrame, symbol: str, keep_today: bool = False) -> Days:
+def build_days(bars: pd.DataFrame, symbol: str, keep_today: bool = False, session: tuple | None = None) -> Days:
     """Shape bars into sessions. The live bot uses this too, with keep_today for the unfinished session."""
-    zone, first_minute, grid_minutes, needed_bars = SESSIONS.get(symbol, US_SESSION)
+    # A tactic may name its own hours, for example the full German session instead of the DAX tactic's morning
+    zone, first_minute, grid_minutes, needed_bars = session or SESSIONS.get(symbol, US_SESSION)
     local = bars["time"] - pd.Timedelta(hours=SERVER_HOURS_AHEAD_OF_NY)
     if zone != US_SESSION[0]:
         local = (local.dt.tz_localize(US_SESSION[0], ambiguous="NaT", nonexistent="NaT")
@@ -146,7 +147,8 @@ def run_one(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mu
         def fee(minute: int) -> float:
             return size * cost_mult * (spread[minute] * (0.5 + SLIPPAGE_SHARE) / o[0] + days.commission)
 
-        for start, end in zip(checks, checks[1:] + [SESSION_MINUTES - 1]):
+        last = days.open.shape[1] - 1  # the close-out minute of whatever session the days hold
+        for start, end in zip(checks, checks[1:] + [last]):
             if not halted:
                 target = tactic.decide(d, start - 1, c[start - 1], position, levels)
                 if target != 0 and position == 0 and rng is not None:
@@ -194,7 +196,7 @@ def run_one(days: Days, tactic, settings: dict, target_daily_vol: float, cost_mu
             lowest = min(lowest, pnl + position * size * (adverse - entry) / o[0])
 
         if position != 0:
-            pnl += position * size * (o[-1] - entry) / o[0] - fee(SESSION_MINUTES - 1)
+            pnl += position * size * (o[-1] - entry) / o[0] - fee(last)
         returns[d] = pnl
         worst[d] = min(lowest, pnl)
     return Result(days.dates, returns, worst, trades)

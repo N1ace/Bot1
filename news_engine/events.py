@@ -7,14 +7,16 @@ The key is read from the root .env and never printed.
 import html
 import os
 import re
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
 from news_engine.store import new_york_to_utc
 
 FOMC_PAGE = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+ECB_PAGE = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
 FRED_DATES = "https://api.stlouisfed.org/fred/release/dates"
 FRED_RELEASE = "https://api.stlouisfed.org/fred/release"
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
@@ -24,6 +26,9 @@ TIMEOUT = 30
 MONTHS = ("January February March April May June July August September October November December").split()
 MEETING = re.compile(rf"({'|'.join(MONTHS)})(?:/({'|'.join(MONTHS)}))? (\d{{1,2}})-(\d{{1,2}})")
 STATEMENT = time(14, 0)
+PRESS_CONFERENCE = time(14, 30)
+ECB_DECISION = time(14, 15)
+FRANKFURT = ZoneInfo("Europe/Berlin")
 DATA_RELEASE = time(8, 30)
 
 # FRED release ID, the words its name must contain, and tier. The name check catches a wrong ID
@@ -48,8 +53,28 @@ def parse_fomc(page: str) -> list[tuple[str, str]]:
 def fomc_events() -> list[tuple]:
     response = requests.get(FOMC_PAGE, headers=HEADERS, timeout=TIMEOUT)
     response.raise_for_status()
-    return [(f"FOMC-{day}", "FOMC", 1, new_york_to_utc(day, STATEMENT).isoformat(), "federalreserve.gov")
-            for day in parse_fomc(response.text)]
+    rows = []
+    for day in parse_fomc(response.text):
+        rows.append((f"FOMC-{day}", "FOMC", 1, new_york_to_utc(day, STATEMENT).isoformat(), "federalreserve.gov"))
+        rows.append((f"FOMC_PRESS-{day}", "FOMC_PRESS", 1, new_york_to_utc(day, PRESS_CONFERENCE).isoformat(), "federalreserve.gov"))
+    return rows
+
+
+def parse_ecb(page: str) -> list[str]:
+    """Decision days: the second day of each monetary policy meeting, which ends with a press conference."""
+    text = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style).*?</\1>", " ", page, flags=re.S))))
+    found = re.findall(r"(\d{2})/(\d{2})/(\d{4}) [^/]{0,120}?followed by press conference", text)
+    return sorted({f"{year}-{month}-{day}" for day, month, year in found})
+
+
+def ecb_events() -> list[tuple]:
+    response = requests.get(ECB_PAGE, headers=HEADERS, timeout=TIMEOUT)
+    response.raise_for_status()
+    rows = []
+    for day in parse_ecb(response.text):
+        moment = datetime.combine(date.fromisoformat(day), ECB_DECISION, tzinfo=FRANKFURT).astimezone(timezone.utc)
+        rows.append((f"ECB-{day}", "ECB", 2, moment.isoformat(), "ecb.europa.eu"))
+    return rows
 
 
 def fred_key() -> str | None:

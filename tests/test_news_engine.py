@@ -1,10 +1,16 @@
-from datetime import datetime, time, timedelta, timezone
+import ast
+import sqlite3
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from news_engine import ai, analog, briefing, daily, events, news, reactions, regime, store, telegram
+from ftmo import bot
+from news_engine import (ai, analog, briefing, context, daily, events, news, positioning, profiles, reactions, regime, schedule,
+                         store, telegram)
 
 
 def test_new_york_time_follows_the_clock_change():
@@ -284,3 +290,209 @@ def test_failed_send_is_tried_again(tmp_path, monkeypatch):
     monkeypatch.setattr(telegram, "send", lambda text: "failed: status 500")
     daily.send_once("a", NOW)
     assert not daily.SENT_PATH.exists()
+
+
+UTC = timezone.utc
+
+
+def calendar_db(tmp_path, *extra, refreshed="2026-11-10T07:00:00+00:00"):
+    """A healthy calendar, plus any events the test adds."""
+    db = store.connect(tmp_path / "c.sqlite")
+    rows = [("CPI-a", "CPI", 1, "2026-11-20T13:30:00+00:00", "t"), ("NFP-a", "NFP", 1, "2026-11-20T13:30:00+00:00", "t"),
+            ("FOMC-a", "FOMC", 1, "2026-12-09T19:00:00+00:00", "t"), *extra]
+    events.save_events(db, rows)
+    db.execute("INSERT INTO health VALUES ('calendar', ?)", (refreshed,))
+    db.commit()
+    db.close()
+    return tmp_path / "c.sqlite"
+
+
+TUESDAY = datetime(2026, 11, 10, 16, 0, tzinfo=UTC)  # 11:00 New York
+
+
+def noise(path, now):
+    return context.get_context("US100", now, path).permissions["noise_area"]
+
+
+def test_quiet_time_is_allowed_at_full_size(tmp_path):
+    p = noise(calendar_db(tmp_path), TUESDAY)
+    assert p.allowed and p.size_mult == 1.0 and p.mode == "normal"
+
+
+def test_tier_1_windows_open_at_the_exact_minute(tmp_path):
+    moment = "2026-11-10T16:00:00+00:00"
+    path = calendar_db(tmp_path, ("PPI-x", "CPI", 1, moment, "t"))
+    assert noise(path, TUESDAY - timedelta(minutes=16)).allowed
+    assert not noise(path, TUESDAY - timedelta(minutes=15)).allowed
+    assert not noise(path, TUESDAY).allowed
+    assert not noise(path, TUESDAY + timedelta(minutes=30)).allowed
+    assert noise(path, TUESDAY + timedelta(minutes=31)).allowed
+
+
+def test_tier_2_halves_but_its_release_still_blocks(tmp_path):
+    path = calendar_db(tmp_path, ("GDP-x", "GDP", 2, "2026-11-10T16:00:00+00:00", "t"))
+    before = noise(path, TUESDAY - timedelta(minutes=10))
+    assert before.allowed and before.size_mult == 0.5
+    assert not noise(path, TUESDAY + timedelta(minutes=1)).allowed
+
+
+def test_ftmo_window_is_marked_for_two_minutes_only(tmp_path):
+    path = calendar_db(tmp_path, ("CPI-x", "CPI", 1, "2026-11-10T16:00:00+00:00", "t"))
+    inside = context.get_context("US100", TUESDAY + timedelta(minutes=2), path)
+    outside = context.get_context("US100", TUESDAY + timedelta(minutes=3), path)
+    assert inside.events[0].ftmo_restricted and any("no_open_or_close" in x for x in inside.manage_positions)
+    assert not outside.events[0].ftmo_restricted
+
+
+def test_the_most_cautious_rule_wins(tmp_path):
+    path = calendar_db(tmp_path, ("GDP-x", "GDP", 2, "2026-11-10T16:05:00+00:00", "t"),
+                       ("CPI-x", "CPI", 1, "2026-11-10T16:10:00+00:00", "t"))
+    p = noise(path, TUESDAY)
+    assert not p.allowed and p.size_mult == 0.0
+
+
+def test_size_never_rises_above_one_and_stops_never_tighten(tmp_path):
+    p = noise(calendar_db(tmp_path), TUESDAY)
+    assert 0 <= p.size_mult <= 1 and p.stop_mult >= 1
+
+
+def test_friday_long_close_rule(tmp_path):
+    path = calendar_db(tmp_path, refreshed="2026-11-13T07:00:00+00:00")
+    friday = datetime(2026, 11, 13, 19, 49, tzinfo=UTC)  # 14:49 New York
+    assert noise(path, friday).allowed
+    blocked = noise(path, friday + timedelta(minutes=1))
+    assert not blocked.allowed and "FTMO long-close rule" in blocked.reasons
+
+
+def test_no_trades_on_a_short_market_day(tmp_path):
+    path = calendar_db(tmp_path, ("FOMC-y", "FOMC", 1, "2027-01-27T19:00:00+00:00", "t"),
+                       ("CPI-y", "CPI", 1, "2026-12-10T13:30:00+00:00", "t"),
+                       ("NFP-y", "NFP", 1, "2026-12-04T13:30:00+00:00", "t"), refreshed="2026-11-27T07:00:00+00:00")
+    blocked = noise(path, datetime(2026, 11, 27, 15, 0, tzinfo=UTC))
+    assert not blocked.allowed and "market closed or short day" in blocked.reasons
+
+
+def test_old_calendar_fails_closed(tmp_path):
+    path = calendar_db(tmp_path)
+    late = context.get_context("US100", TUESDAY + timedelta(hours=30), path)
+    assert late.stale and not late.permissions["noise_area"].allowed
+
+
+def test_missing_tier_1_date_fails_closed(tmp_path):
+    db = store.connect(tmp_path / "c.sqlite")
+    db.execute("INSERT INTO health VALUES ('calendar', ?)", (TUESDAY.isoformat(),))
+    db.commit()
+    db.close()
+    assert context.get_context("US100", TUESDAY, tmp_path / "c.sqlite").stale
+
+
+def test_unreadable_database_fails_closed(tmp_path):
+    result = context.safe_get_context("US100", TUESDAY, tmp_path / "missing.sqlite")
+    assert result.stale and not result.permissions["noise_area"].allowed
+
+
+def test_unknown_symbol_fails_closed(tmp_path):
+    result = context.safe_get_context("BTC", TUESDAY, calendar_db(tmp_path))
+    assert result.stale
+
+
+def test_context_cannot_write(tmp_path):
+    db = store.read_only(calendar_db(tmp_path))
+    with pytest.raises(sqlite3.OperationalError):
+        db.execute("DELETE FROM events")
+
+
+def bad_profile(**change):
+    return {**profiles.NOISE_AREA_DEMO, **change}
+
+
+def test_profiles_refuse_unsafe_values():
+    profiles.validate("ok", profiles.NOISE_AREA_DEMO)
+    for wrong in (bad_profile(family="magic"), bad_profile(uses_outlook=True),
+                  bad_profile(situations_allowed=["release"]), bad_profile(event_sensitivity={1: "maybe", 2: "half", 3: "allow"}),
+                  bad_profile(pre_minutes={1: 1, 2: 10, 3: 0})):
+        with pytest.raises(ValueError):
+            profiles.validate("bad", wrong)
+
+
+def test_year_boundary_and_two_month_fomc():
+    page = "2026 FOMC Meetings December 8-9* 2027 FOMC Meetings January 26-27 April/May 30-1"
+    assert events.parse_fomc(page) == ["2026-12-09", "2027-01-27", "2027-05-01"]
+
+
+def test_ecb_decision_days_only():
+    page = """<div>16/12/2026 Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 1)</div>
+    <div>17/12/2026 Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 2), followed by press conference</div>
+    <div>25/11/2026 Governing Council of the ECB: non-monetary policy meeting (in Frankfurt)</div>"""
+    assert events.parse_ecb(page) == ["2026-12-17"]
+
+
+def test_ism_skips_holidays_and_weekends():
+    assert schedule.nth_business_day(2027, 1, 1) == date(2027, 1, 4)
+    assert schedule.nth_business_day(2026, 11, 1) == date(2026, 11, 2)
+    assert schedule.nth_business_day(2026, 11, 3) == date(2026, 11, 4)
+
+
+def test_opex_moves_when_friday_is_closed():
+    assert schedule.third_friday(2026, 11) == date(2026, 11, 20)
+    assert schedule.third_friday(2027, 6) == date(2027, 6, 17)
+
+
+def test_rule_events_use_new_york_time():
+    rows = schedule.rule_events(date(2026, 11, 2))
+    assert ("ISM_MFG-2026-11-02", "ISM_MFG", 2, "2026-11-02T15:00:00+00:00", "rule") in rows
+
+
+def test_news_engine_has_no_broker_or_bot_imports():
+    forbidden = {"MetaTrader5", "ftmo", "cryptobot", "monitor"}
+    for path in Path(store.__file__).parent.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            assert not {n.split(".")[0] for n in names} & forbidden, path.name
+
+
+def test_holidays_match_the_bot():
+    assert schedule.CLOSED_DAYS | schedule.EARLY_CLOSE_DAYS == bot.NO_TRADE_DAYS
+
+
+def test_fear_rank():
+    assert regime.fear_rank([10.0] * 100) is None  # too little history
+    history = [float(v) for v in range(1, 301)]
+    assert regime.fear_rank(history) == 1.0
+    assert regime.fear_rank(history + [150.0]) == 150 / 300
+
+
+def cot_week(funds_long, funds_short, date="2026-11-03"):
+    return {"report_date_as_yyyy_mm_dd": f"{date}T00:00:00.000", "open_interest_all": "100",
+            "lev_money_positions_long": str(funds_long), "lev_money_positions_short": str(funds_short),
+            "asset_mgr_positions_long": "60", "asset_mgr_positions_short": "20"}
+
+
+def test_positioning_labels_crowded_weeks():
+    history = [cot_week(30 + i % 10, 30) for i in range(100)]
+    assert positioning.summarize(history[:10]) is None
+    assert positioning.summarize(history + [cot_week(80, 10)])["label"] == "unusually long"
+    assert positioning.summarize(history + [cot_week(10, 80)])["label"] == "unusually short"
+    found = positioning.summarize(history + [cot_week(34, 30)])
+    assert found["label"] == "normal" and found["funds_net_pct"] == 4.0 and found["managers_net_pct"] == 40.0
+
+
+def test_positioning_failure_is_reported_not_raised(tmp_path, monkeypatch):
+    def down(now):
+        raise positioning.requests.ConnectionError("x")
+    monkeypatch.setattr(positioning, "fetch", down)
+    assert positioning.update(store.connect(tmp_path / "t.sqlite"), NOW) == "failed: ConnectionError"
+
+
+def test_briefing_shows_fear_and_positioning(tmp_path):
+    db = store.connect(tmp_path / "t.sqlite")
+    db.execute("INSERT INTO regime VALUES ('2026-11-02', 'calm', 1.0, ?)",
+               ('{"vix": 15, "curve_10y_2y": 0.5, "sp500_above_200_day": true, "vix_rank_5y": 0.91, "high_fear": true}',))
+    db.execute("INSERT INTO positioning VALUES ('2026-11-03', ?)", ('{"report_date": "2026-11-03", "funds_net_pct": 2.0, '
+               '"funds_rank_3y": 0.95, "managers_net_pct": 24.0, "label": "unusually long"}',))
+    text = briefing.make_briefing(db, NOW)
+    assert "HIGH FEAR" in text and "unusually long" in text

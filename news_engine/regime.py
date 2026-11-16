@@ -15,6 +15,8 @@ LOOKBACK_DAYS = 420
 AVERAGE_DAYS = 200
 
 STRESS_VIX, HIGH_VIX = 30.0, 20.0
+FEAR_YEARS = 5
+HIGH_FEAR_RANK = 0.80  # research finds returns change above roughly the 80th to 85th VIX percentile. Report-only
 
 
 def classify(vix: float | None, curve: float | None, above_average: bool | None) -> tuple[str, float]:
@@ -31,8 +33,16 @@ def classify(vix: float | None, curve: float | None, above_average: bool | None)
     return label, multiplier
 
 
-def values(key: str, series: str, now: datetime) -> list[float]:
-    start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+def fear_rank(history: list[float]) -> float | None:
+    """Share of the past values at or below today's VIX: 0.9 means fear is higher than on 90% of days."""
+    if len(history) < 250:
+        return None
+    today = history[-1]
+    return sum(v <= today for v in history[:-1]) / (len(history) - 1)
+
+
+def values(key: str, series: str, now: datetime, days: int = LOOKBACK_DAYS) -> list[float]:
+    start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
     data = events.fred_get(OBSERVATIONS, {"series_id": series, "api_key": key, "file_type": "json",
                                           "observation_start": start})
     return [float(row["value"]) for row in data["observations"] if row["value"] != "."]
@@ -45,6 +55,7 @@ def update(db, now: datetime) -> str:
         return "no FRED key"
     try:
         data = {name: values(key, series, now) for name, series in SERIES.items()}
+        long_vix = values(key, SERIES["vix"], now, FEAR_YEARS * 365)
     except RuntimeError as e:
         return str(e)
     vix = data["vix"][-1] if data["vix"] else None
@@ -52,7 +63,9 @@ def update(db, now: datetime) -> str:
     prices = data["sp500"]
     above = prices[-1] > sum(prices[-AVERAGE_DAYS:]) / AVERAGE_DAYS if len(prices) >= AVERAGE_DAYS else None
     label, multiplier = classify(vix, curve, above)
-    details = {"vix": vix, "curve_10y_2y": curve, "sp500_above_200_day": above}
+    rank = fear_rank(long_vix)
+    details = {"vix": vix, "curve_10y_2y": curve, "sp500_above_200_day": above,
+               "vix_rank_5y": None if rank is None else round(rank, 3), "high_fear": None if rank is None else rank >= HIGH_FEAR_RANK}
     db.execute("INSERT OR REPLACE INTO regime VALUES (?, ?, ?, ?)", (f"{now:%Y-%m-%d}", label, multiplier, json.dumps(details)))
     db.commit()
     return label

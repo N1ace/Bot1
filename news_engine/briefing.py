@@ -56,8 +56,17 @@ def make_briefing(db, now: datetime, days: int = 7) -> str:
     regime = db.execute("SELECT label, risk_budget_mult, details_json FROM regime ORDER BY day DESC LIMIT 1").fetchone()
     if regime:
         details = json.loads(regime[2])
-        lines += ["", f"Market conditions: {regime[0]}, suggested risk {regime[1]:.2f}x (reduce-only, not used by any bot yet)",
+        lines += ["", f"Market conditions: {regime[0]}, suggested risk {regime[1]:.2f}x (reduce-only rule, not used: noise_area did no worse in high fear on past data)",
                   f"  VIX {details['vix']}, 10y-2y curve {details['curve_10y_2y']}, S&P above 200-day: {details['sp500_above_200_day']}"]
+        if details.get("vix_rank_5y") is not None:
+            fear = "HIGH FEAR" if details["high_fear"] else "normal"
+            lines.append(f"  Fear: VIX higher than on {details['vix_rank_5y']:.0%} of days in 5 years, {fear} (report-only)")
+    crowd = db.execute("SELECT details_json FROM positioning ORDER BY report_date DESC LIMIT 1").fetchone()
+    if crowd:
+        c = json.loads(crowd[0])
+        lines.append(f"  Nasdaq futures, week of {c['report_date']}: hedge funds net {c['funds_net_pct']:+.1f}% of contracts, "
+                     f"more long than {c['funds_rank_3y']:.0%} of weeks in 3 years, {c['label']}; "
+                     f"asset managers net {c['managers_net_pct']:+.1f}% (report-only)")
 
     lines += ["", "Blackouts, default rule:"]
     windows = db.execute("SELECT event_id, start_utc, end_utc FROM blackouts WHERE firm = 'default' AND start_utc < ? "

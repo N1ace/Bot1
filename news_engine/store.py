@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS llm_log (
     output_tokens INTEGER, cost_usd REAL
 );
 CREATE TABLE IF NOT EXISTS regime (day TEXT PRIMARY KEY, label TEXT NOT NULL, risk_budget_mult REAL NOT NULL, details_json TEXT);
+CREATE TABLE IF NOT EXISTS health (name TEXT PRIMARY KEY, at_utc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS positioning (report_date TEXT PRIMARY KEY, details_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS blackouts (
     event_id TEXT NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, firm TEXT NOT NULL
 );
@@ -47,8 +49,14 @@ CREATE TABLE IF NOT EXISTS predictions (
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
+    db.execute("PRAGMA journal_mode=WAL")  # lets a reader work while the daily job writes
     db.executescript(SCHEMA)
     return db
+
+
+def read_only(path: Path | str = DB_PATH) -> sqlite3.Connection:
+    """For the context layer. It fails if the file is missing, and it can't change anything."""
+    return sqlite3.connect(f"{Path(path).as_uri()}?mode=ro", uri=True)
 
 
 def new_york_to_utc(day: str, at: time) -> datetime:

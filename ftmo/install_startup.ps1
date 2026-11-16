@@ -11,13 +11,16 @@ param([switch]$Remove, [long]$DemoLogin = 0)
 
 $MT5Task = "ftmo-mt5"
 $BotTask = "ftmo-bot"
+$WatchTask = "ftmo-watchdog"
 $Repo = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $Repo ".venv\Scripts\python.exe"
+$PythonNoWindow = Join-Path $Repo ".venv\Scripts\pythonw.exe"
 
 if ($Remove) {
     Unregister-ScheduledTask -TaskName $BotTask -Confirm:$false
     Unregister-ScheduledTask -TaskName $MT5Task -Confirm:$false
-    Write-Output "Removed '$MT5Task' and '$BotTask'."
+    Unregister-ScheduledTask -TaskName $WatchTask -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Output "Removed '$MT5Task', '$BotTask' and '$WatchTask'."
     exit 0
 }
 if (-not (Test-Path $Python)) { throw "Python venv not found at $Python" }
@@ -43,5 +46,14 @@ $botSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIf
 Register-ScheduledTask -TaskName $BotTask -Action $botAction -Trigger $botTrigger -Settings $botSettings `
     -Description "FTMO demo bot" -Force | Out-Null
 
+# Every 30 minutes, at 15 and 45 past. It only acts near US hours, and never shows a window
+$watchAction = New-ScheduledTaskAction -Execute $PythonNoWindow -Argument "-m ftmo.watchdog" -WorkingDirectory $Repo
+$watchTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date -Hour 0 -Minute 15 -Second 0) `
+    -RepetitionInterval (New-TimeSpan -Minutes 30)
+$watchSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName $WatchTask -Action $watchAction -Trigger $watchTrigger -Settings $watchSettings `
+    -Description "Telegram warning if the FTMO bot or MT5 is down" -Force | Out-Null
+
 $mode = if ($DemoLogin -gt 0) { "DEMO ORDERS on login $DemoLogin" } else { "dry run, no orders" }
-Write-Output "Installed '$MT5Task' and '$BotTask'. Bot mode: $mode."
+Write-Output "Installed '$MT5Task', '$BotTask' and '$WatchTask'. Bot mode: $mode."

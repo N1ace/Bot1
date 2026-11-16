@@ -78,7 +78,8 @@ def look_ahead_check(days, tactic) -> bool:
 
 def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
     tactic = importlib.import_module(f"ftmo.tactics.{name}")
-    days = load_days(getattr(tactic, "SYMBOL", SYMBOL), include_holdout)
+    session = getattr(tactic, "SESSION", None)
+    days = load_days(getattr(tactic, "SYMBOL", SYMBOL), include_holdout, session)
     base = run(days, tactic, tactic.SETTINGS, TEST_VOL)
     s = sharpe(base.returns)
 
@@ -95,7 +96,7 @@ def evaluate(name: str, include_holdout: bool, trials: int) -> dict:
 
     randoms = [sharpe(run(days, tactic, tactic.SETTINGS, TEST_VOL, random_seed=i).returns) for i in range(RANDOM_RUNS)]
     info_symbol = getattr(tactic, "INFO_SYMBOL", "US500.cash")
-    other = run(load_days(info_symbol, include_holdout), tactic, tactic.SETTINGS, TEST_VOL) if info_symbol else None
+    other = run(load_days(info_symbol, include_holdout, session), tactic, tactic.SETTINGS, TEST_VOL) if info_symbol else None
 
     measured = {
         "trades": base.trades, "sharpe": s,
@@ -142,7 +143,7 @@ def main() -> None:
         if len({e["name"] for e in log}) >= MAX_TACTICS:
             raise SystemExit("Refused: tactic budget is used up.")
         tactic = importlib.import_module(f"ftmo.tactics.{args.name}")
-        if not look_ahead_check(load_days(getattr(tactic, "SYMBOL", SYMBOL)), tactic):
+        if not look_ahead_check(load_days(getattr(tactic, "SYMBOL", SYMBOL), session=getattr(tactic, "SESSION", None)), tactic):
             raise SystemExit("Refused: the tactic looks into the future.")
     else:
         passes = [e for e in tested if e["fingerprint"] == print_me and e["result"]["all_passed"]]

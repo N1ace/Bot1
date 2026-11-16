@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -27,16 +28,35 @@ import pandas as pd
 
 from ftmo import backtest
 from ftmo.tactics import noise_area as tactic
+from news_engine import telegram
 
 SYMBOL = "US100.cash"
 MAGIC = 26110101  # marks this bot's positions
-TARGET_DAILY_VOL = 0.005  # the lab's test level
+
+
+@dataclass(frozen=True)
+class Plan:
+    daily_vol: float  # the sizing target: how much the account should move on a typical day
+    day_stop: float  # halt for the day at this loss
+    total_stop: float  # halt for good at this loss from the first deposit
+
+
+# From the 100k ticket simulation (2026-11-08, visible data only). "demo" is the lab's test level and the bot's own
+# limits. The others push harder and sit just inside FTMO's 5% and 10%: for a paid account, after ~30 demo trades,
+# the owner's decision and a safety review. The bot itself still refuses any account that isn't a demo.
+PLANS = {
+    "demo": Plan(0.005, backtest.DAY_STOP, backtest.TOTAL_STOP),
+    "challenge": Plan(0.03, -0.045, -0.095),
+    "funded": Plan(0.015, -0.045, -0.095),
+}
 HISTORY_BARS = 45_000  # enough for the lookback and the volatility window
 POLL_SECONDS = 20
+SESSION_OPEN = 9 * 60 + 30
 MAX_DEVIATION_POINTS = 500  # 5 index points, so a close isn't refused in a fast market
 STALE_SECONDS = 120  # no price for this long means the feed, or the clock, can't be trusted
 MIN_STOP_SPREADS = 2  # refuse an entry whose stop would sit this close to the price
 MAX_SPREAD = 2 * backtest.MEASURED_SPREAD[SYMBOL]  # news or thin markets: skip the entry, exits are never blocked
+LONG_CLOSE_FROM = 14 * 60 + 50 - SESSION_OPEN  # FTMO: nothing opens within 2 hours of a long close. MT5 closes at 16:50
 SPIKE_MINUTES = 5
 SPIKE_MULTIPLE = 3.0  # skip an entry if the last 5 minutes ran this many times their usual range
 SPIKE_DAYS = 20
@@ -47,7 +67,6 @@ REQUEST_LIMIT = 1000
 CLOSE_RETRY_SECONDS = (20, 40, 80, 160, 300)
 
 NEW_YORK = ZoneInfo("America/New_York")
-SESSION_OPEN = 9 * 60 + 30
 FOMC_FLAT_FROM = 13 * 60 + 55 - SESSION_OPEN  # flat 5 minutes before the 14:00 statement
 FOMC_RESUME = 14 * 60 + 30 - SESSION_OPEN  # the next half-hour check after the press conference starts
 LAST_MINUTE = backtest.SESSION_MINUTES - 1  # 15:59: close everything
@@ -66,10 +85,55 @@ NO_TRADE_DAYS = {date.fromisoformat(d) for d in (
 )}
 
 BOT_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ftmo-bot"
+DEAL_REASON_SL = 4  # MT5's code for a fill by the broker stop
+REPEAT_SECONDS = 30 * 60  # the same Telegram text goes out at most once in this time
+WARNINGS = {"cannot_close": "Can't close: market closed", "stale_price": "Price feed is stale, no new trades",
+            "limits_unknown": "Can't read the account history, no new trades", "no_data": "MT5 returned no data",
+            "request_limit": "Daily request limit reached", "step_error": "Error in a step"}
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def message(event: str, details: dict, place_orders: bool) -> str | None:
+    """The Telegram text for a journal row, or None if the owner doesn't need to hear about it."""
+    tag = "FTMO demo" if place_orders else "FTMO dry run"
+    if event == "started":
+        return f"{tag}: bot started, {details.get('plan', 'demo')} risk plan"
+    if event == "deal" and details.get("deal", {}).get("symbol"):
+        deal = details["deal"]
+        opening = deal["entry"] == 0
+        side = "long" if (deal["type"] == 0) == opening else "short"  # a long is closed by a sell
+        if opening:
+            return f"{tag}: opened, {side} {deal['volume']} {deal['symbol']} at {deal['price']}"
+        result = deal["profit"] + deal["swap"] + deal["commission"] + deal["fee"]
+        how = "broker stop hit" if deal["reason"] == DEAL_REASON_SL else "closed"
+        return f"{tag}: {how}, {side} {deal['volume']} {deal['symbol']} at {deal['price']}, result {result:+.2f} USD"
+    if event == "order_reply":
+        reply = details.get("reply")
+        if reply is None or reply.get("retcode") != mt5.TRADE_RETCODE_DONE:
+            why = "no reply" if reply is None else reply.get("comment")
+            return f"{tag}: order not filled ({why}), {details.get('why')}"
+    if event == "dry_run_order":
+        return f"{tag}: would have sent an order, {details.get('why')}"
+    if event == "entry_skipped":
+        return f"{tag}: entry skipped, {details.get('reason')}"
+    if event in WARNINGS:
+        return f"{tag} WARNING: {WARNINGS[event]}"
+    return None
+
+
+def notify(text: str) -> None:
+    """Send in the background, so a slow Telegram never delays a close."""
+    threading.Thread(target=send_now, args=(text,), daemon=True).start()
+
+
+def send_now(text: str) -> None:
+    try:
+        telegram.send(text)
+    except Exception:  # a message is never worth stopping the bot
+        pass
 
 
 @dataclass
@@ -93,7 +157,10 @@ def file_stem(login: int, place_orders: bool) -> Path:
 def load_state(path: Path, login: int) -> State:
     if not path.exists():
         return State(login=login)
-    state = State(**json.loads(path.read_text(encoding="utf-8")))
+    try:
+        state = State(**json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, TypeError) as e:
+        raise SystemExit(f"Refused: {path} is damaged ({e}). Check the account has no open trade, then move the file aside.")
     if state.login != login:
         raise SystemExit(f"Refused: {path} belongs to another account.")
     return state
@@ -101,7 +168,10 @@ def load_state(path: Path, login: int) -> State:
 
 def save_state(state: State, path: Path) -> None:
     partial = path.with_suffix(".part")
-    partial.write_text(json.dumps(asdict(state)), encoding="utf-8")
+    with open(partial, "w", encoding="utf-8") as f:
+        f.write(json.dumps(asdict(state)))
+        f.flush()
+        os.fsync(f.fileno())  # on disk before the swap, so a power cut can't leave a file of zeros
     partial.replace(path)
 
 
@@ -139,6 +209,11 @@ def symbol_is_trading(server_now: datetime) -> bool:
     return server_now.weekday() < 5 and 65 <= minutes < 23 * 60 + 50
 
 
+def near_long_close(day: date, minute: int) -> bool:
+    """Late on a Friday, or before a day the market is shut or short."""
+    return minute >= LONG_CLOSE_FROM and (day.weekday() == 4 or day + timedelta(days=1) in NO_TRADE_DAYS)
+
+
 def volatility_spike(days, today: int, minute: int) -> bool:
     """Compare the last few closed minutes with the same minutes on earlier days."""
     start = max(0, minute - SPIKE_MINUTES)
@@ -156,9 +231,9 @@ def lots_for(size: float, equity: float, price: float, step: float, smallest: fl
     return 0.0 if lots < smallest else min(lots, largest)
 
 
-def equity_floor(day_start: float, start_balance: float) -> float:
+def equity_floor(day_start: float, start_balance: float, plan: Plan = PLANS["demo"]) -> float:
     """The higher of the two limits: the equity below which a new stop must not allow us to go."""
-    return max(day_start * (1 + backtest.DAY_STOP), start_balance * (1 + backtest.TOTAL_STOP))
+    return max(day_start * (1 + plan.day_stop), start_balance * (1 + plan.total_stop))
 
 
 def stop_price(direction: int, entry: float, hard_stop: float, equity: float, floor: float, lots: float,
@@ -178,8 +253,9 @@ def stop_is_usable(direction: int, stop: float, bid: float, ask: float) -> bool:
 
 
 class Bot:
-    def __init__(self, place_orders: bool, login: int, stem: Path):
+    def __init__(self, place_orders: bool, login: int, stem: Path, plan: str = "demo"):
         self.place_orders = place_orders
+        self.plan_name, self.plan = plan, PLANS[plan]
         self.login = login
         self.state_path = stem.with_suffix(".state.json")
         self.journal_path = stem.with_suffix(".journal.jsonl")
@@ -189,6 +265,7 @@ class Bot:
         self.next_close_at = 0.0
         self.last_alert = ""
         self.pending_exit = False  # a tactic exit that hasn't filled yet
+        self.sent_at: dict[str, float] = {}  # each Telegram text, and when it last went out
 
     def journal(self, event: str, **details) -> None:
         row = {"utc": utc_now().isoformat(timespec="seconds"), "event": event, **details}
@@ -197,6 +274,14 @@ class Bot:
             with self.journal_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, default=str) + "\n")
         except (OSError, ValueError):
+            pass
+        try:  # losing a message is never worth losing a close
+            text = message(event, details, self.place_orders)
+            last_time = self.sent_at.get(text, -math.inf)
+            if text and time.monotonic() - last_time >= REPEAT_SECONDS:  # a repeating error mustn't flood the phone
+                self.sent_at[text] = time.monotonic()
+                notify(text)
+        except Exception:
             pass
 
     def alert(self, event: str, **details) -> None:
@@ -272,7 +357,7 @@ class Bot:
         if lots == 0:
             self.journal("entry_skipped", reason="below the smallest lot", size=size, equity=account.equity)
             return
-        floor = equity_floor(self.state.day_start, self.state.start_balance)
+        floor = equity_floor(self.state.day_start, self.state.start_balance, self.plan)
         stop = stop_price(direction, price, hard_stop, account.equity, floor, lots, self.info.trade_tick_size)
         if not stop_is_usable(direction, stop, tick.bid, tick.ask):
             self.journal("entry_skipped", reason="stop too close to the price", stop=stop, bid=tick.bid, ask=tick.ask)
@@ -304,8 +389,8 @@ class Bot:
             return  # try again on the next poll of this minute
         key = f"{day} {minute}"
         levels = tactic.levels(days, tactic.SETTINGS)
-        sizes = backtest.position_sizes(days, TARGET_DAILY_VOL,
-                                        TARGET_DAILY_VOL / tactic.PAPER_VOL_TARGET * tactic.PAPER_MAX_EXPOSURE)
+        vol = self.plan.daily_vol
+        sizes = backtest.position_sizes(days, vol, vol / tactic.PAPER_VOL_TARGET * tactic.PAPER_MAX_EXPOSURE)
         today = len(days.dates) - 1
         if not levels.ready[today] or sizes[today] <= 0:
             self.journal("check_skipped", minute=minute, reason="not enough history")
@@ -323,7 +408,9 @@ class Bot:
                 self.pending_exit = True
                 return
         self.state.last_check = key
-        if target != 0 and target != current and volatility_spike(days, today, minute):
+        if target != 0 and target != current and near_long_close(day, minute):
+            self.journal("entry_skipped", reason="FTMO long-close rule", minute=minute)
+        elif target != 0 and target != current and volatility_spike(days, today, minute):
             self.journal("entry_skipped", reason="volatility spike", minute=minute)
         elif target != 0 and target != current and day not in NO_TRADE_DAYS:
             self.open(target, float(sizes[today]), float(levels.hard_stop[today]), account)
@@ -377,7 +464,7 @@ class Bot:
         limits_known = self.update_limits(account, server_now, server_day)
         self.record_deals(server_now)
 
-        in_session = 0 <= minute < LAST_MINUTE
+        in_session = 0 <= minute < LAST_MINUTE and day.weekday() < 5  # weekends were counted, so Saturday warned of stale prices
         session_start = (server_now.replace(hour=0, minute=0, second=0) + timedelta(minutes=SESSION_OPEN)
                          + timedelta(hours=backtest.SERVER_HOURS_AHEAD_OF_NY))
         overnight = [p for p in found if datetime.fromtimestamp(p.time, timezone.utc).replace(tzinfo=None) < session_start]
@@ -418,9 +505,9 @@ class Bot:
             state.day, state.day_start = server_day, max(opening, account.equity)
         if state.start_balance == 0:
             return False
-        if account.equity <= state.start_balance * (1 + backtest.TOTAL_STOP):
+        if account.equity <= state.start_balance * (1 + self.plan.total_stop):
             state.halted_for_good = True
-        if account.equity <= state.day_start * (1 + backtest.DAY_STOP):
+        if account.equity <= state.day_start * (1 + self.plan.day_stop):
             state.halted_day = server_day
         return True
 
@@ -439,6 +526,7 @@ class Bot:
                 self.next_close_at = 0.0
                 self.close(position, "stopped by the owner")
             print("Stopped. Check MT5 shows no open position.", flush=True)
+            send_now("FTMO bot stopped with Ctrl+C. Check MT5 shows no open position.")
 
 
 def main() -> None:
@@ -446,9 +534,19 @@ def main() -> None:
     parser.add_argument("--place-demo-orders", action="store_true")
     parser.add_argument("--login", type=int)
     parser.add_argument("--once", action="store_true", help="run one step, for checking")
+    parser.add_argument("--plan", choices=sorted(PLANS), default="demo", help="risk settings, see PLANS")
     args = parser.parse_args()
     if args.once and args.place_demo_orders:
         parser.error("--once can't place orders: nothing would watch the trade afterwards")
+    try:
+        start(args)
+    except SystemExit as e:  # the window closes at once, so this message is often the only sign
+        if isinstance(e.code, str):
+            send_now(f"FTMO bot STOPPED: {e.code}")
+        raise
+
+
+def start(args) -> None:
     if not mt5.initialize():
         raise SystemExit(f"Can't reach MT5: {mt5.last_error()}")
     try:
@@ -463,8 +561,8 @@ def main() -> None:
         if args.place_demo_orders and not mt5.terminal_info().trade_allowed:
             raise SystemExit("Refused: turn on Algo Trading in MT5 first.")
         BOT_DIR.mkdir(parents=True, exist_ok=True)
-        bot = Bot(args.place_demo_orders, account.login, file_stem(account.login, args.place_demo_orders))
-        bot.journal("started", server=account.server, place_orders=args.place_demo_orders)
+        bot = Bot(args.place_demo_orders, account.login, file_stem(account.login, args.place_demo_orders), args.plan)
+        bot.journal("started", server=account.server, place_orders=args.place_demo_orders, plan=args.plan)
         bot.run(args.once)
     finally:
         mt5.shutdown()

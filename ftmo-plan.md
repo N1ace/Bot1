@@ -139,7 +139,7 @@ The bot stops well before each limit. Starting values: stop for the day at -3%, 
 ## Lab results
 
 Data: FTMO's own 1-minute bars. Test period 2021-10 to 2025-04, on US100. Hidden from 2025-05, used only by a final run.
-Full results are in `ftmo/lab_log.json`. 9 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
+Full results are in `ftmo/lab_log.json`. 11 of 12 tactics used. The spread floor is in price points, which overcharges years when prices were lower, gold most of
 all. New tactics should set it as a percentage. That applies to new tests only.
 
 | Tactic | Result | Why |
@@ -153,6 +153,8 @@ all. New tactics should set it as a percentage. That applies to new tests only.
 | noise_area_gold | FAIL, 2026-11-01 | noise_area unchanged on XAUUSD. Sharpe -0.67, lost in all 5 years, beat random 99% |
 | dax_overnight_range | FAIL, 2026-11-01 | Sharpe 0.76, luck check 0.46, beat only 87% of random. Stable, and all 4 years positive. GER40 commission assumed zero, not read from MT5 |
 | noise_trailing | FAIL, 2026-11-01 | Owner-approved exception. Broker stop tightened at each check. Sharpe 0.92, 0.19 at double costs, luck check 0.58. Trades rose from 744 to 1,198 |
+| noise_area_ger40 | FAIL, 2026-11-08 | noise_area unchanged on the Xetra session, to find days that differ from US100's. Sharpe 0.18, beat only 63% of random, 2023 lost 7.5% |
+| us100_overnight | FAIL, 2026-11-08 | Long from 15:59 to the next open, Mon to Thu. Sharpe -0.33, lost in 3 of 5 years. Flaw found after the test: swap was charged as a fixed 6.56 points, but FTMO's swap is a share of price (0.024%), so older, cheaper years were overcharged by 4.7% in total against a 4.9% loss. Fairly charged it is about flat, still far below the 0.8 gate. Its US500 info number is invalid: night bars were read from US100 |
 
 Lessons: the two good results both enter on a break during the day and hold to the close. Betting against moves lost, and
 30-minute trades left too little after costs. Stability is the shared weakness. Any new gate wording applies only to new
@@ -243,3 +245,13 @@ $0.50 per side on minis and $0.20 on micros, plus exchange fees. FTMO's FAQ repo
 `news_engine/` follows `news-analog-engine-spec.md`, independent of the bot. First stage: free data, move size only, US100,
 US500 and GER40. CPI, NFP, FOMC, PPI, PCE, retail sales and GDP are stored, with the key in the root `.env`. Paid consensus
 data waits until this stage proves useful. Reports use size, never direction, so the lab's hidden period stays unused.
+
+Crowd signals, report-only (2026-11-08): the briefing shows how high VIX is against 5 years (high fear above the 80th
+percentile, `news_engine/regime.py`) and how one-sided hedge funds are in Nasdaq-100 futures against 3 years (CFTC weekly
+report, unusual past 90%, `news_engine/positioning.py`). Visible-data check: noise_area did no worse on high-fear days
+(Sharpe 1.56 on 98 trading days, 1.47 on the rest), so fear is no reason to cut its risk. Nothing trades on either yet.
+
+News bot upgrade, per `news-bot-upgrade-spec.md`. Stage 1 is done, in `news_engine/`: more events, tactic profiles, and
+`context.safe_get_context`, which is report-only and fails closed. No bot reads it yet. Next: daily stress, then bot hooks
+after a few stable demo days. Before any paid account, the bot must stop opening trades within 2 hours of a long close,
+such as after 14:50 New York on Fridays. The backtests didn't apply that rule.

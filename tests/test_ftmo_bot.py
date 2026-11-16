@@ -70,6 +70,16 @@ def position(direction=1, sl=27_900.0, ticket=7, opened=SERVER_EPOCH - 60):
     return SimpleNamespace(type=kind, sl=sl, ticket=ticket, volume=0.3, magic=bot.MAGIC, time=int(opened))
 
 
+@pytest.fixture(autouse=True)
+def sent(monkeypatch):
+    """Telegram messages the bot would send. Tests never reach the real Telegram."""
+    texts = []
+    monkeypatch.setattr(bot, "notify", texts.append)
+    monkeypatch.setattr(bot, "send_now", texts.append)
+    monkeypatch.setattr(bot.telegram, "send", lambda text: pytest.fail("a test tried to send to Telegram"))
+    return texts
+
+
 @pytest.fixture
 def fake(monkeypatch):
     mt5 = FakeMT5()
@@ -130,6 +140,13 @@ def test_state_from_another_account_is_refused(tmp_path):
     bot.save_state(bot.State(login=1, start_balance=10_000), path)
     with pytest.raises(SystemExit):
         bot.load_state(path, 2)
+
+
+def test_damaged_state_is_refused_with_a_message(tmp_path):
+    path = tmp_path / "s.json"
+    path.write_bytes(b"\0" * 211)  # what a power cut left on 2026-11-03
+    with pytest.raises(SystemExit, match="damaged"):
+        bot.load_state(path, 1)
 
 
 def test_dry_and_demo_keep_separate_files():
@@ -475,3 +492,146 @@ def test_unknown_limits_block_entries(fake, monkeypatch, tmp_path):
     fake.history_deals_get = lambda *_: None
     make_bot(tmp_path).step()
     assert fake.orders == []
+
+
+def friday_at(monkeypatch, fake, hour, minute):
+    """Move the fake clock to Friday 13 November 2026, New York winter time."""
+    moment = datetime(2026, 11, 13, hour + 5, minute, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr(bot, "utc_now", lambda: moment)
+    fake.tick_time = datetime(2026, 11, 13, hour + 7, minute, 0, tzinfo=timezone.utc).timestamp()
+
+
+def test_long_close_window():
+    friday, monday = date(2026, 11, 13), date(2026, 11, 16)
+    assert not bot.near_long_close(friday, 319)  # 14:49
+    assert bot.near_long_close(friday, 320) and bot.near_long_close(friday, 360)
+    assert not bot.near_long_close(monday, 360)
+    assert bot.near_long_close(date(2026, 11, 25), 360)  # the day before Thanksgiving
+
+
+def test_friday_afternoon_entry_is_skipped_and_journaled(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    friday_at(monkeypatch, fake, 15, 0)
+    b = make_bot(tmp_path)
+    b.step()
+    assert fake.orders == []
+    assert "FTMO long-close rule" in b.journal_path.read_text(encoding="utf-8")
+
+
+def test_friday_morning_entry_still_works(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, 1)
+    friday_at(monkeypatch, fake, 14, 30)
+    make_bot(tmp_path).step()
+    assert len(fake.orders) == 1
+
+
+def test_friday_rule_never_blocks_a_close(fake, monkeypatch, tmp_path):
+    signal(monkeypatch, -1)
+    friday_at(monkeypatch, fake, 15, 30)
+    fake.open_positions = [position(1, opened=fake.tick_time - 60)]
+    b = make_bot(tmp_path)
+    b.step()
+    assert len(fake.orders) == 1 and fake.orders[0]["position"] == 7
+    fake.open_positions = []
+    b.step()
+    assert len(fake.orders) == 1
+
+
+def deal(entry, kind, reason=3, profit=0.0, swap=0.0):
+    return {"deal": {"symbol": "US100.cash", "entry": entry, "type": kind, "reason": reason, "volume": 0.1,
+                     "price": 27_000.0, "profit": profit, "swap": swap, "commission": 0.0, "fee": 0.0}}
+
+
+def test_messages_name_the_position_and_result():
+    assert bot.message("deal", deal(0, 0), True) == "FTMO demo: opened, long 0.1 US100.cash at 27000.0"
+    assert bot.message("deal", deal(0, 1), True).startswith("FTMO demo: opened, short")
+    closed = bot.message("deal", deal(1, 1, profit=-14.78, swap=-0.7), True)
+    assert "closed, long" in closed and "-15.48 USD" in closed
+    assert bot.message("deal", deal(1, 0, reason=bot.DEAL_REASON_SL), True).startswith("FTMO demo: broker stop hit, short")
+    assert bot.message("deal", {"deal": {"ticket": 1, "symbol": ""}}, True) is None  # the opening deposit
+    assert bot.message("started", {"plan": "demo"}, False) == "FTMO dry run: bot started, demo risk plan"
+    assert bot.message("check", {"minute": 30}, True) is None
+
+
+def test_refused_order_sends_a_message(fake, monkeypatch, tmp_path, sent):
+    signal(monkeypatch, 1)
+    fake.reply_code = real.TRADE_RETCODE_REJECT
+    make_bot(tmp_path).step()
+    assert any("order not filled" in text for text in sent)
+
+
+def test_weekend_is_never_a_session(fake, monkeypatch, tmp_path, sent):
+    signal(monkeypatch, 1)
+    monkeypatch.setattr(bot, "utc_now", lambda: datetime(2026, 11, 7, 16, 0, 5, tzinfo=timezone.utc))  # Sat 11:00 NY
+    b = make_bot(tmp_path)
+    b.step()
+    assert fake.orders == []
+    assert "stale_price" not in b.journal_path.read_text(encoding="utf-8") if b.journal_path.exists() else True
+    assert sent == []
+
+
+def test_a_refused_start_sends_a_message(fake, monkeypatch, sent):
+    monkeypatch.setattr(fake, "initialize", lambda: False)
+    monkeypatch.setattr("sys.argv", ["bot"])
+    with pytest.raises(SystemExit):
+        bot.main()
+    assert sent and sent[0].startswith("FTMO bot STOPPED: Can't reach MT5")
+
+
+def test_a_broken_message_never_stops_a_close(fake, monkeypatch, tmp_path):
+    def broken(text):
+        raise RuntimeError("can't start a thread")
+    monkeypatch.setattr(bot, "notify", broken)
+    signal(monkeypatch, 0)
+    fake.open_positions = [position(1)]
+    b = make_bot(tmp_path)
+    b.pending_exit = True
+    b.step()
+    assert len(fake.orders) == 1 and fake.orders[0]["position"] == 7
+
+
+def test_the_same_warning_is_sent_once_in_half_an_hour(fake, monkeypatch, tmp_path, sent):
+    b = make_bot(tmp_path)
+    for _ in range(3):
+        b.journal("step_error", error="same")
+    assert sent == ["FTMO demo WARNING: Error in a step"]
+    b.sent_at = {text: when - bot.REPEAT_SECONDS for text, when in b.sent_at.items()}
+    b.journal("step_error", error="same")
+    assert len(sent) == 2
+
+
+def test_weekend_position_waits_for_the_market(fake, monkeypatch, tmp_path, sent):
+    signal(monkeypatch, 1)
+    monkeypatch.setattr(bot, "utc_now", lambda: datetime(2026, 11, 7, 16, 0, 5, tzinfo=timezone.utc))  # Sat 11:00 NY
+    fake.open_positions = [position(1, opened=SERVER_EPOCH - 86_400)]
+    b = make_bot(tmp_path)
+    b.step()
+    b.step()
+    assert fake.orders == []
+    assert b.journal_path.read_text(encoding="utf-8").count("cannot_close") == 1
+    assert sent == ["FTMO demo WARNING: Can't close: market closed"]
+
+
+def test_demo_plan_keeps_the_tested_settings():
+    demo = bot.PLANS["demo"]
+    assert (demo.daily_vol, demo.day_stop, demo.total_stop) == (0.005, bot.backtest.DAY_STOP, bot.backtest.TOTAL_STOP)
+    assert bot.equity_floor(10_000, 10_000) == bot.equity_floor(10_000, 10_000, demo)
+
+
+def test_harder_plans_stay_inside_ftmo_limits():
+    for name in ("challenge", "funded"):
+        plan = bot.PLANS[name]
+        assert -0.05 < plan.day_stop < 0 and -0.10 < plan.total_stop < 0
+    assert bot.equity_floor(10_000, 10_000, bot.PLANS["challenge"]) == 9_550
+
+
+def test_plan_sets_the_size_and_the_halts(fake, monkeypatch, tmp_path):
+    seen = []
+    signal(monkeypatch, 0)
+    monkeypatch.setattr(bot.backtest, "position_sizes", lambda days, vol, cap: seen.append(vol) or [1.0])
+    b = bot.Bot(True, LOGIN, tmp_path / "t", "challenge")
+    b.step()
+    assert seen == [0.03]
+    fake.equity = 9_600  # -4%: inside the challenge plan's -4.5% day stop, past the demo plan's -3%
+    b.step()
+    assert b.state.halted_day == ""

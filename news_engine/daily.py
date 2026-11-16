@@ -6,42 +6,30 @@ MT5 and never trades. If MT5 isn't running, the job still scores and predicts fr
     python -m news_engine.daily
 """
 
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from news_engine import ai, analog, briefing, events, news, reactions, regime, store, telegram
+from news_engine import ai, analog, briefing, events, news, positioning, reactions, regime, schedule, store, telegram
 
 HORIZON_HOURS = 48
-HISTORY_BARS = 30_000
+PRICE_TIMEOUT = 180
 LOG_PATH = store.DB_PATH.with_name("news_engine.log")
 SENT_PATH = store.DB_PATH.with_name("news_sent.txt")
 
 
 def update_prices() -> bool:
-    """Add MT5's latest bars to the saved history. Read-only: this never calls order_send."""
-    import MetaTrader5 as mt5
-
-    if not mt5.initialize():
-        return False
+    """A separate process adds MT5's latest bars, so nothing in the news engine touches MT5."""
     try:
-        for symbol in reactions.SYMBOLS:
-            info = mt5.symbol_info(symbol)
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, HISTORY_BARS)
-            if info is None or rates is None or len(rates) == 0:
-                return False
-            fresh = pd.DataFrame(rates)
-            fresh["time"] = pd.to_datetime(fresh["time"], unit="s")
-            fresh["spread"] = fresh["spread"] * info.point
-            path = reactions.BARS_DIR / f"{symbol}_M1.pkl"
-            old = pd.read_pickle(path)
-            columns = list(old.columns)
-            merged = pd.concat([old[old["time"] < fresh["time"].iloc[0]], fresh[columns]], ignore_index=True)
-            merged.to_pickle(path)
-    finally:
-        mt5.shutdown()
-    return True
+        done = subprocess.run([sys.executable, "-m", "ftmo.mt5_data", "--latest"], timeout=PRICE_TIMEOUT, capture_output=True,
+                              cwd=Path(__file__).resolve().parent.parent)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
 
 
 def past_moves(db, kind: str, symbol: str, window: str, before: str) -> pd.DataFrame:
@@ -115,20 +103,23 @@ def main() -> None:
     db = store.connect()
     now = datetime.now(timezone.utc)
     prices = update_prices()
-    rows = events.fomc_events()
+    rows = events.fomc_events() + events.ecb_events() + schedule.rule_events(now.date())
     key = events.fred_key()
     if key:
         rows += events.fred_events(key)
     events.save_events(db, rows)
+    db.execute("INSERT OR REPLACE INTO health VALUES ('calendar', ?)", (now.isoformat(),))
+    db.commit()
     reactions.record_all(db)
     fresh, failed = news.fetch_news(db)
     ai_status = ai.review(db, now)
     conditions = regime.update(db, now)
+    crowd = positioning.update(db, now)
     bars = {s: reactions.load_bars(s) for s in reactions.SYMBOLS}
     saved = predict(db, now, lambda s: reactions.pre_volatility(bars[s], pd.Timestamp(now)))
     briefing.write_blackouts(db, now)
     line = (f"{now:%Y-%m-%d %H:%M} UTC, MT5 prices {'updated' if prices else 'NOT updated'}, {saved} estimates saved, "
-            f"{score(db)} scored, {fresh} headlines, feeds failed {failed or 'none'}, AI: {ai_status}, regime: {conditions}. {scorecard(db)}")
+            f"{score(db)} scored, {fresh} headlines, feeds failed {failed or 'none'}, AI: {ai_status}, regime: {conditions}, positioning: {crowd}. {scorecard(db)}")
     text = briefing.make_briefing(db, now)
     briefing.BRIEFING_PATH.write_text(text, encoding="utf-8")
     line += f" Telegram: {send_once(text, now)}."
